@@ -1,4 +1,6 @@
+mod capture;
 mod config;
+mod editor;
 mod geom;
 mod model;
 mod pixelate;

@@ -210,6 +210,26 @@ impl Document {
         }
     }
 
+    /// Troca a cor de um objeto (passo de desfazer próprio).
+    pub fn set_color_at(&mut self, i: usize, c: Color) {
+        if i >= self.items.len() {
+            return;
+        }
+        self.checkpoint();
+        let a = &mut self.items[i];
+        match a {
+            Annotation::Pen { color, .. }
+            | Annotation::Line { color, .. }
+            | Annotation::Arrow { color, .. }
+            | Annotation::Rect { color, .. }
+            | Annotation::Ellipse { color, .. }
+            | Annotation::Marker { color, .. }
+            | Annotation::Text { color, .. }
+            | Annotation::Number { color, .. } => *color = c,
+            Annotation::Pixelate { .. } => {}
+        }
+    }
+
     pub fn next_number(&self) -> u32 {
         self.items
             .iter()
