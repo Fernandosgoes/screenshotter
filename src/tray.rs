@@ -9,7 +9,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MF_SEPARATOR, MF_STRING, PostMessageW, SetForegroundWindow, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON,
     TrackPopupMenu, WM_APP, WM_NULL,
 };
-use windows::core::w;
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::core::{PCWSTR, w};
 
 pub const WM_APP_TRAY: u32 = WM_APP + 1;
 pub const ID_MENU_SETTINGS: usize = 1002;
@@ -25,14 +26,19 @@ fn data(hwnd: HWND) -> NOTIFYICONDATAW {
         uCallbackMessage: WM_APP_TRAY,
         ..Default::default()
     };
-    let tip: Vec<u16> = "Screenshotter".encode_utf16().collect();
+    let tip: Vec<u16> = "iCatcher".encode_utf16().collect();
     nid.szTip[..tip.len()].copy_from_slice(&tip);
     nid
 }
 
 pub fn add(hwnd: HWND) -> windows::core::Result<()> {
     let mut nid = data(hwnd);
-    nid.hIcon = unsafe { LoadIconW(None, IDI_APPLICATION)? };
+    // Ícone embutido no .exe pelo build.rs (recurso de ID 1); fallback para o padrão.
+    nid.hIcon = unsafe {
+        let hinst = GetModuleHandleW(None).unwrap_or_default();
+        LoadIconW(Some(hinst.into()), PCWSTR(1usize as *const u16))
+            .or_else(|_| LoadIconW(None, IDI_APPLICATION))?
+    };
     unsafe { Shell_NotifyIconW(NIM_ADD, &nid).ok() }
 }
 

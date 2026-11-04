@@ -1,6 +1,9 @@
-//! Screenshotter: capturador de tela para Windows, sem rede.
-//! Ponto de entrada: DPI por monitor, configurações, janela principal oculta,
-//! bandeja, atalho global e loop de mensagens.
+//! iCatcher: capturador de tela para Windows, sem rede.
+//! Ponto de entrada: DPI por monitor, instância única, configurações, janela principal
+//! oculta, bandeja, atalho global e loop de mensagens.
+
+// Sem janela de console: o app roda só na bandeja.
+#![windows_subsystem = "windows"]
 
 mod capture;
 mod config;
@@ -19,8 +22,9 @@ mod tray;
 
 use config::Settings;
 use std::path::PathBuf;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -30,7 +34,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-const MAIN_CLASS: PCWSTR = w!("ShotMainWnd");
+const MAIN_CLASS: PCWSTR = w!("iCatcherMain");
+const APP_NAME: PCWSTR = w!("iCatcher");
 
 fn settings_path() -> PathBuf {
     std::env::current_exe()
@@ -70,12 +75,13 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
     }
 }
 
-/// Abre settings.json no editor padrão. Cria o arquivo com os padrões se faltar.
-/// Janela própria de configurações fica pendente (ver plano, Task 14).
+/// Abre settings.json no editor padrão. Se não existir, cria com os padrões, refletindo
+/// o estado atual de "iniciar com o Windows" (para não desfazer a opção do instalador).
 fn open_settings(hwnd: HWND) {
     let path = settings_path();
     if !path.exists() {
-        let _ = Settings::default().save(&path);
+        let s = Settings { start_with_windows: startup::is_enabled(), ..Settings::default() };
+        let _ = s.save(&path);
     }
     let wpath: Vec<u16> = path.display().to_string().encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
@@ -86,19 +92,30 @@ fn open_settings(hwnd: HWND) {
 fn message(text: &str) {
     let wtext: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
-        MessageBoxW(None, PCWSTR(wtext.as_ptr()), w!("Screenshotter"), MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(None, PCWSTR(wtext.as_ptr()), APP_NAME, MB_OK | MB_ICONINFORMATION);
     }
 }
 
 fn main() {
     log::set_debug(std::env::args().any(|a| a == "--debug"));
+
+    // Instância única: se já há uma rodando, a segunda sai sem fazer nada.
+    let _single = unsafe {
+        let h = CreateMutexW(None, true, w!("iCatcher.SingleInstance"));
+        match h {
+            Ok(h) if GetLastError() != ERROR_ALREADY_EXISTS => Some(h),
+            _ => return,
+        }
+    };
+
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
 
+    // Se o settings.json existe, ele manda em "iniciar com o Windows".
     let settings = Settings::load(&settings_path());
-    if settings.start_with_windows {
-        let _ = startup::set_enabled(true);
+    if settings_path().exists() {
+        let _ = startup::set_enabled(settings.start_with_windows);
     }
 
     unsafe {
@@ -113,7 +130,7 @@ fn main() {
         let hwnd = match CreateWindowExW(
             Default::default(),
             MAIN_CLASS,
-            w!("Screenshotter"),
+            APP_NAME,
             WS_POPUP,
             0,
             0,

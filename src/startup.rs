@@ -4,7 +4,16 @@
 use std::process::Command;
 
 const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-const NAME: &str = "Screenshotter";
+const NAME: &str = "iCatcher";
+
+/// Verdadeiro se o valor de inicialização automática existe.
+pub fn is_enabled() -> bool {
+    Command::new("reg")
+        .args(["query", KEY, "/v", NAME])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
 
 pub fn set_enabled(on: bool) -> std::io::Result<()> {
     if on {

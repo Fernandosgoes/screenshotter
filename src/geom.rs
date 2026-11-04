@@ -197,9 +197,17 @@ pub fn layout_bars(sel: Rect, screen: Rect, v_items: i32, h_items: i32, item: i3
     }
 
     BarLayout {
-        vertical: Rect { x: vx, y: vy, w: vw, h: vh }.clamp_to(screen),
-        horizontal: Rect { x: hx, y: hy, w: hw, h: hh }.clamp_to(screen),
+        vertical: shift_inside(Rect { x: vx, y: vy, w: vw, h: vh }, screen),
+        horizontal: shift_inside(Rect { x: hx, y: hy, w: hw, h: hh }, screen),
     }
+}
+
+/// Desloca `r` para dentro de `bounds` sem mudar o tamanho (quando couber).
+/// Diferente de `clamp_to`, que encolhe e cortaria os botões da barra.
+pub fn shift_inside(r: Rect, bounds: Rect) -> Rect {
+    let x = r.x.clamp(bounds.x, (bounds.right() - r.w).max(bounds.x));
+    let y = r.y.clamp(bounds.y, (bounds.bottom() - r.h).max(bounds.y));
+    Rect { x, y, ..r }
 }
 
 #[cfg(test)]

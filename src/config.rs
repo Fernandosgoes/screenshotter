@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HotkeyChoice {
+    #[default]
+    ShiftBackspace,
     PrtScn,
     ShiftPrtScn,
 }
@@ -54,7 +56,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            hotkey: HotkeyChoice::PrtScn,
+            hotkey: HotkeyChoice::ShiftBackspace,
             start_with_windows: false,
             stroke_width: 3,
             text_size: 18,
@@ -86,7 +88,7 @@ mod tests {
     #[test]
     fn defaults_match_prd() {
         let s = Settings::default();
-        assert_eq!(s.hotkey, HotkeyChoice::PrtScn);
+        assert_eq!(s.hotkey, HotkeyChoice::ShiftBackspace);
         assert!(!s.start_with_windows);
         assert_eq!(s.stroke_width, 3);
         assert_eq!(s.text_size, 18);

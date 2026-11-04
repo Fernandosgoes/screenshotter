@@ -22,7 +22,7 @@ use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC,
     CreateDIBSection, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE,
     DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint, GetStockObject, HBITMAP, HDC,
-    HGDIOBJ, InvalidateRect, NULL_BRUSH, PAINTSTRUCT, PS_DASH, PS_SOLID, Rectangle, RGBQUAD,
+    HGDIOBJ, InvalidateRect, NULL_BRUSH, PAINTSTRUCT, PS_SOLID, Rectangle, RGBQUAD,
     SRCCOPY, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -31,13 +31,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HWND_TOPMOST, IDC_CROSS, LoadCursorW,
-    RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos,
-    ShowWindow, WM_CHAR, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_PAINT, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetCursor, SetForegroundWindow,
+    SetWindowPos, ShowWindow, WM_CHAR, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_PAINT, WM_SETCURSOR, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
-const CLASS: PCWSTR = w!("ShotOverlayWnd");
+const CLASS: PCWSTR = w!("iCatcherOverlay");
 const HANDLE_SIZE: i32 = 6;
 /// MK_SHIFT do WM_MOUSEMOVE (wParam), valor fixo do Win32.
 const MK_SHIFT_FLAG: usize = 0x0004;
@@ -50,6 +50,8 @@ pub struct Session {
     pub back: Surface,
     pub t0: Instant,
     pub first_frame_logged: bool,
+    /// Botão da barra sob o mouse (realce).
+    pub hover: Option<Button>,
 }
 
 /// DC + bitmap de memória com o conteúdo BGRA de uma captura (ou um buffer vazio).
@@ -116,7 +118,7 @@ pub fn create() -> windows::core::Result<HWND> {
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             CLASS,
-            w!("Screenshotter"),
+            w!("iCatcher"),
             WS_POPUP,
             origin.x,
             origin.y,
@@ -163,6 +165,7 @@ pub fn start_capture(settings: &Settings) -> windows::core::Result<()> {
         back,
         t0,
         first_frame_logged: false,
+        hover: None,
     };
     SESSION.with(|s| *s.borrow_mut() = Some(session));
 
@@ -216,10 +219,22 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             SESSION.with(|s| {
                 if let Some(sess) = s.borrow_mut().as_mut() {
                     sess.editor.on_mouse_move(p, shift);
+                    sess.hover = sess.editor.sel.and_then(|sel| {
+                        toolbar::hit(&toolbar::layout(sel, sess.editor.screen_rect()), p)
+                    });
                 }
             });
             redraw(hwnd);
             LRESULT(0)
+        }
+        WM_SETCURSOR => {
+            // Cursor fixo em cruz: evita o "carregando" que o Windows mostra ao iniciar o app.
+            unsafe {
+                if let Ok(cross) = LoadCursorW(None, IDC_CROSS) {
+                    SetCursor(Some(cross));
+                }
+            }
+            LRESULT(1)
         }
         WM_LBUTTONUP => {
             SESSION.with(|s| {
@@ -400,10 +415,17 @@ fn paint_to(hdc: HDC) {
                 let l = toolbar::layout(sel, e.screen_rect());
                 let (v, hz) = toolbar::button_rects(&l);
                 let active = active_button(e.tool);
-                toolbar::paint_buttons(b, &v, Some(active), e.color);
-                toolbar::paint_buttons(b, &hz, None, e.color);
+                toolbar::paint_panel(b, l.vertical);
+                toolbar::paint_buttons(b, &v, Some(active), sess.hover, e.color);
+                toolbar::paint_panel(b, l.horizontal);
+                toolbar::paint_buttons(b, &hz, None, sess.hover, e.color);
                 if e.palette_open {
-                    toolbar::paint_palette(b, &toolbar::palette_rects(&l));
+                    toolbar::paint_palette(
+                        b,
+                        toolbar::palette_panel(&l),
+                        &toolbar::palette_rects(&l),
+                        e.color,
+                    );
                 }
             }
             let _ = BitBlt(hdc, 0, 0, w, h, Some(b), 0, 0, SRCCOPY);
@@ -432,10 +454,15 @@ fn active_button(t: Tool) -> Button {
 /// Moldura tracejada, alças e etiqueta de medidas.
 unsafe fn paint_selection(hdc: HDC, sel: Rect, screen_w: i32) {
     unsafe {
-        let dash = CreatePen(PS_DASH, 1, COLORREF(0x0000_0000));
-        let old_pen = SelectObject(hdc, HGDIOBJ(dash.0));
+        // Traçado contínuo estilo Lightshot: linha escura por fora, branca por dentro.
+        let outer = CreatePen(PS_SOLID, 1, COLORREF(0x0000_0000));
+        let old_pen = SelectObject(hdc, HGDIOBJ(outer.0));
         let old_brush = SelectObject(hdc, HGDIOBJ(GetStockObject(NULL_BRUSH).0));
+        let _ = Rectangle(hdc, sel.x - 1, sel.y - 1, sel.right() + 1, sel.bottom() + 1);
+        let inner = CreatePen(PS_SOLID, 1, COLORREF(0x00FF_FFFF));
+        SelectObject(hdc, HGDIOBJ(inner.0));
         let _ = Rectangle(hdc, sel.x, sel.y, sel.right(), sel.bottom());
+        let dash = inner;
 
         let white = CreateSolidBrush(COLORREF(0x00FF_FFFF));
         let edge = CreatePen(PS_SOLID, 1, COLORREF(0x0000_0000));
@@ -474,7 +501,7 @@ unsafe fn paint_selection(hdc: HDC, sel: Rect, screen_w: i32) {
 
         SelectObject(hdc, old_pen);
         SelectObject(hdc, old_brush);
-        for o in [dash.0, edge.0] {
+        for o in [outer.0, dash.0, edge.0] {
             let _ = DeleteObject(HGDIOBJ(o));
         }
         for o in [white.0, dark.0] {
