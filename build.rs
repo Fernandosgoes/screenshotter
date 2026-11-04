@@ -1,4 +1,4 @@
-// Embute o ícone no .exe (recurso de ID 1, usado pela bandeja em tray.rs).
+﻿// Embute o ícone no .exe (recurso de ID 1, usado pela bandeja em tray.rs).
 //
 // Chama o windres direto, a partir do OUT_DIR e com nomes relativos: caminhos com
 // espaços (este projeto fica em "Projetos pessoais\NOvo lightshot") quebram o
@@ -28,7 +28,7 @@ fn main() {
 
     // Objeto COFF com o ícone, empacotado numa biblioteca estática para o linker.
     run("windres", &["-i", "app.rc", "-O", "coff", "-o", "app.o"]);
-    run("ar", &["rcs", "libicatcher_res.a", "app.o"]);
+    run("ar", &["rcs", "libScreenshotter_res.a", "app.o"]);
     println!("cargo:rustc-link-search=native={}", out.display());
-    println!("cargo:rustc-link-lib=static=icatcher_res");
+    println!("cargo:rustc-link-lib=static=Screenshotter_res");
 }

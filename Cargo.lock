@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "Screenshotter"
+version = "1.0.0"
+dependencies = [
+ "png",
+ "serde",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -47,16 +57,6 @@ dependencies = [
  "crc32fast",
  "miniz_oxide 0.9.1",
  "zlib-rs",
-]
-
-[[package]]
-name = "icatcher"
-version = "1.0.0"
-dependencies = [
- "png",
- "serde",
- "serde_json",
- "windows",
 ]
 
 [[package]]

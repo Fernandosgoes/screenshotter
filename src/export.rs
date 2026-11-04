@@ -1,4 +1,4 @@
-//! Achatamento da imagem final: pixelização (irreversível) e depois formas vetoriais,
+﻿//! Achatamento da imagem final: pixelização (irreversível) e depois formas vetoriais,
 //! PNG, área de transferência (CF_DIB) e diálogo "Salvar como" (sem pasta padrão).
 
 use crate::capture::Capture;

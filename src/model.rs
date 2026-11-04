@@ -1,4 +1,4 @@
-//! Modelo de anotações: lista de objetos editáveis com desfazer/refazer.
+﻿//! Modelo de anotações: lista de objetos editáveis com desfazer/refazer.
 //! Puro (sem Win32). Cada gesto do usuário vira um passo de desfazer.
 
 use crate::config::Color;

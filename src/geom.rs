@@ -1,4 +1,4 @@
-//! Geometria pura: retângulos, alças, restrição de ângulo e layout das barras.
+﻿//! Geometria pura: retângulos, alças, restrição de ângulo e layout das barras.
 //! Sem Win32, testável em qualquer host.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

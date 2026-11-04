@@ -1,4 +1,4 @@
-//! Estado da captura em curso: seleção, ferramenta, cor, espessura, texto.
+﻿//! Estado da captura em curso: seleção, ferramenta, cor, espessura, texto.
 //! Não toca Win32. Recebe eventos já traduzidos e muda o `Document`.
 
 use crate::capture::Capture;

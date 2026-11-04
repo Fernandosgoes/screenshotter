@@ -1,4 +1,4 @@
-//! Atalho global. Padrão: Shift+Backspace. Se o Windows recusar o registro (outro programa
+﻿//! Atalho global. Padrão: Shift+Backspace. Se o Windows recusar o registro (outro programa
 //! já usa a combinação), tenta a alternativa PrtScn e informa o motivo.
 
 use crate::config::HotkeyChoice;

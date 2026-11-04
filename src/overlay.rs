@@ -1,4 +1,4 @@
-//! Janela de sobreposição (topmost, cobre a área virtual). Pré-criada e oculta.
+﻿//! Janela de sobreposição (topmost, cobre a área virtual). Pré-criada e oculta.
 //! Traduz mensagens Win32 em eventos do `Editor` e pinta o resultado com buffer duplo.
 //!
 //! Regra de re-entrância: nunca segurar o `RefCell` da sessão ao chamar Win32 que pode
@@ -37,7 +37,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, w};
 
-const CLASS: PCWSTR = w!("iCatcherOverlay");
+const CLASS: PCWSTR = w!("ScreenshotterOverlay");
 const HANDLE_SIZE: i32 = 6;
 /// MK_SHIFT do WM_MOUSEMOVE (wParam), valor fixo do Win32.
 const MK_SHIFT_FLAG: usize = 0x0004;
@@ -118,7 +118,7 @@ pub fn create() -> windows::core::Result<HWND> {
         let hwnd = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             CLASS,
-            w!("iCatcher"),
+            w!("Screenshotter"),
             WS_POPUP,
             origin.x,
             origin.y,

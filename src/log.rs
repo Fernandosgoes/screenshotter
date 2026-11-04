@@ -1,4 +1,4 @@
-//! Log de latência no stderr, só com `--debug`. Nunca registra conteúdo de imagem.
+﻿//! Log de latência no stderr, só com `--debug`. Nunca registra conteúdo de imagem.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;

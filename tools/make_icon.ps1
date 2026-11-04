@@ -1,4 +1,4 @@
-﻿# Gera assets\icon.ico (PNG dentro de ICO) do iCatcher. Rodar: powershell -File tools\make_icon.ps1
+﻿# Gera assets\icon.ico (PNG dentro de ICO) do Screenshotter. Rodar: powershell -File tools\make_icon.ps1
 Add-Type -AssemblyName System.Drawing
 $root = Split-Path -Parent $PSScriptRoot
 $sizes = 16, 24, 32, 48, 64, 128, 256

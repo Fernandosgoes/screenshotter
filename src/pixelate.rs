@@ -1,4 +1,4 @@
-//! Pixelização irreversível: cada bloco recebe a média dos seus pixels.
+﻿//! Pixelização irreversível: cada bloco recebe a média dos seus pixels.
 //! Os pixels originais são sobrescritos no buffer, então não ficam no arquivo.
 
 use crate::geom::Rect;

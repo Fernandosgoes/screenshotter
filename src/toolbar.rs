@@ -1,4 +1,4 @@
-//! Barras de ícones (PRD F7) e paleta de 6 cores (F11).
+﻿//! Barras de ícones (PRD F7) e paleta de 6 cores (F11).
 //! Visual: painéis escuros arredondados, botões de 40 px, destaque no botão ativo
 //! e realce no hover. Layout puro + pintura GDI.
 

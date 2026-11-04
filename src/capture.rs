@@ -1,4 +1,4 @@
-//! Captura da área virtual (todos os monitores) para um bitmap BGRA em memória.
+﻿//! Captura da área virtual (todos os monitores) para um bitmap BGRA em memória.
 //! Nada é gravado em disco aqui.
 
 use crate::geom::Point;

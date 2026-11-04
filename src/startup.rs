@@ -1,10 +1,10 @@
-//! Iniciar com o Windows: valor em HKCU\...\Run apontando para o .exe atual.
+﻿//! Iniciar com o Windows: valor em HKCU\...\Run apontando para o .exe atual.
 //! Usa reg.exe para manter o código pequeno; só mexe na chave do próprio usuário.
 
 use std::process::Command;
 
 const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-const NAME: &str = "iCatcher";
+const NAME: &str = "Screenshotter";
 
 /// Verdadeiro se o valor de inicialização automática existe.
 pub fn is_enabled() -> bool {

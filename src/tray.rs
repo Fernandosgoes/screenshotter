@@ -1,4 +1,4 @@
-//! Ícone na bandeja e menu de contexto.
+﻿//! Ícone na bandeja e menu de contexto.
 
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::UI::Shell::{
@@ -26,7 +26,7 @@ fn data(hwnd: HWND) -> NOTIFYICONDATAW {
         uCallbackMessage: WM_APP_TRAY,
         ..Default::default()
     };
-    let tip: Vec<u16> = "iCatcher".encode_utf16().collect();
+    let tip: Vec<u16> = "Screenshotter".encode_utf16().collect();
     nid.szTip[..tip.len()].copy_from_slice(&tip);
     nid
 }

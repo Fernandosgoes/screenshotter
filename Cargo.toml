@@ -1,5 +1,5 @@
-[package]
-name = "icatcher"
+﻿[package]
+name = "Screenshotter"
 version = "1.0.0"
 build = "build.rs"
 edition = "2024"

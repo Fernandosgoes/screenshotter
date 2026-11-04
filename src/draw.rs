@@ -1,4 +1,4 @@
-//! Desenho GDI das anotações. Usado tanto na tela quanto na exportação,
+﻿//! Desenho GDI das anotações. Usado tanto na tela quanto na exportação,
 //! então o que se vê é o que se copia.
 
 use crate::config::Color;

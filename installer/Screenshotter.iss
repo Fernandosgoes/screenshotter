@@ -1,10 +1,10 @@
-; Instalador do iCatcher (Inno Setup 6).
-; Compilar: ISCC.exe installer\iCatcher.iss   (gera dist\iCatcher-Setup.exe)
-; Pré-requisito: cargo build --release  (gera target\release\icatcher.exe)
+﻿; Instalador do Screenshotter (Inno Setup 6).
+; Compilar: ISCC.exe installer\Screenshotter.iss   (gera dist\Screenshotter-Setup.exe)
+; Pré-requisito: cargo build --release  (gera target\release\Screenshotter.exe)
 
-#define MyAppName "iCatcher"
+#define MyAppName "Screenshotter"
 #define MyAppVersion "1.0.0"
-#define MyAppExe "icatcher.exe"
+#define MyAppExe "Screenshotter.exe"
 
 [Setup]
 AppId={{582E6E4B-C079-4615-9847-7A4BF289D72D}
@@ -19,7 +19,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\dist
-OutputBaseFilename=iCatcher-Setup
+OutputBaseFilename=Screenshotter-Setup
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExe}
 UninstallDisplayName={#MyAppName}
@@ -28,7 +28,7 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Fecha o app antes de atualizar/desinstalar (usa o mutex de instância única do app).
-AppMutex=iCatcher.SingleInstance
+AppMutex=Screenshotter.SingleInstance
 CloseApplications=yes
 RestartApplications=no
 ShowLanguageDialog=auto
@@ -42,22 +42,22 @@ Name: "desktopicon"; Description: "Criar atalho na área de trabalho"; GroupDesc
 
 [Files]
 Source: "..\target\release\{#MyAppExe}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\assets\icon.ico"; DestDir: "{app}"; DestName: "iCatcher.ico"; Flags: ignoreversion
+Source: "..\assets\icon.ico"; DestDir: "{app}"; DestName: "Screenshotter.ico"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\iCatcher.ico"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\Screenshotter.ico"
 Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\iCatcher.ico"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; IconFilename: "{app}\Screenshotter.ico"; Tasks: desktopicon
 
 [Registry]
 ; Iniciar com o Windows (só se a tarefa estiver marcada). Removido na desinstalação.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "iCatcher"; ValueData: """{app}\{#MyAppExe}"""; Flags: uninsdeletevalue; Tasks: startwithwindows
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Screenshotter"; ValueData: """{app}\{#MyAppExe}"""; Flags: uninsdeletevalue; Tasks: startwithwindows
 
 [Run]
 Filename: "{app}\{#MyAppExe}"; Description: "Iniciar o {#MyAppName} agora"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "taskkill.exe"; Parameters: "/IM {#MyAppExe} /F"; Flags: runhidden; RunOnceId: "StopiCatcher"
+Filename: "taskkill.exe"; Parameters: "/IM {#MyAppExe} /F"; Flags: runhidden; RunOnceId: "StopScreenshotter"
 
 [UninstallDelete]
 Type: files; Name: "{app}\settings.json"
