@@ -11,6 +11,7 @@ mod draw;
 mod editor;
 mod export;
 mod geom;
+mod gfx;
 mod hotkey;
 mod log;
 mod model;
@@ -111,6 +112,8 @@ fn main() {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
+    // Desenho suavizado das barras de ferramentas.
+    gfx::startup();
 
     // Se o settings.json existe, ele manda em "iniciar com o Windows".
     let settings = Settings::load(&settings_path());

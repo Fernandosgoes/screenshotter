@@ -1,17 +1,11 @@
 ﻿//! Barras de ícones (PRD F7) e paleta de 6 cores (F11).
-//! Visual: painéis escuros arredondados, botões de 40 px, destaque no botão ativo
-//! e realce no hover. Layout puro + pintura GDI.
+//! Visual: painéis escuros arredondados com sombra e borda sutil, botões de 40 px,
+//! destaque em indigo no botão ativo e realce no hover. Ícones com traço arredondado.
+//! Layout puro + pintura suavizada (GDI+, ver gfx.rs).
 
 use crate::config::Color;
-use crate::draw;
 use crate::geom::{BarLayout, GAP, Point, Rect, layout_bars, shift_inside};
-use windows::Win32::Foundation::COLORREF;
-use windows::Win32::Foundation::POINT;
-use windows::Win32::Graphics::Gdi::{
-    CreatePen, CreateSolidBrush, DeleteObject, Ellipse, GetStockObject, HDC, HGDIOBJ, LineTo,
-    MoveToEx, NULL_BRUSH, PS_NULL, PS_SOLID, Polyline, Rectangle, RoundRect, SelectObject,
-    SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
-};
+use crate::gfx::{Canvas, RectF, argb, argb_from_colorref};
 
 /// Tamanho de um botão, em pixels.
 pub const BTN: i32 = 40;
@@ -19,14 +13,15 @@ pub const BTN: i32 = 40;
 pub const PAD: i32 = 6;
 const SWATCH: i32 = 24;
 const SWATCH_GAP: i32 = 6;
-const RADIUS: i32 = 16;
+/// Raio dos cantos do painel e dos botões.
+const PANEL_RADIUS: f32 = 18.0;
+const BTN_RADIUS: f32 = 12.0;
 
-// Cores em COLORREF (0x00BBGGRR).
-const PANEL: u32 = 0x003B_291E; // #1E293B
-const PANEL_HOVER: u32 = 0x0055_4133; // #334155
-const ACCENT: u32 = 0x00E5_464F; // #4F46E5
-const INK: u32 = 0x00F9_F5F1; // #F1F5F9
-const RING: u32 = 0x00B8_A394; // #94A3B8
+// Cores em 0xRRGGBB (o alfa é aplicado em cada uso).
+const PANEL_RGB: u32 = 0x0F172A; // slate-900
+const ACCENT_RGB: u32 = 0x6366F1; // indigo-500
+const INK_RGB: u32 = 0xE2E8F0; // slate-200
+const INK_ACTIVE_RGB: u32 = 0xFFFFFF;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Button {
@@ -123,165 +118,113 @@ pub fn palette_hit(l: &BarLayout, p: Point) -> Option<Color> {
     palette_rects(l).into_iter().find(|(_, r)| r.contains(p)).map(|(c, _)| c)
 }
 
-/// Preenche um retângulo arredondado sem contorno.
-unsafe fn fill_round(hdc: HDC, r: Rect, color: u32, radius: i32) {
-    unsafe {
-        let brush = CreateSolidBrush(COLORREF(color));
-        let pen = CreatePen(PS_NULL, 0, COLORREF(0));
-        let ob = SelectObject(hdc, HGDIOBJ(brush.0));
-        let op = SelectObject(hdc, HGDIOBJ(pen.0));
-        let _ = RoundRect(hdc, r.x, r.y, r.right(), r.bottom(), radius, radius);
-        SelectObject(hdc, ob);
-        SelectObject(hdc, op);
-        let _ = DeleteObject(HGDIOBJ(brush.0));
-        let _ = DeleteObject(HGDIOBJ(pen.0));
-    }
+fn rf(r: Rect) -> RectF {
+    (r.x as f32, r.y as f32, r.w as f32, r.h as f32)
 }
 
-/// Fundo do painel (uma das barras ou a paleta).
-pub unsafe fn paint_panel(hdc: HDC, panel: Rect) {
-    unsafe { fill_round(hdc, panel, PANEL, RADIUS) };
+/// Fundo do painel: sombra suave, preenchimento escuro quase opaco e borda clara sutil.
+pub fn paint_panel(cv: &Canvas, panel: Rect) {
+    let r = rf(panel);
+    cv.shadow(r, PANEL_RADIUS);
+    cv.fill_round(r, PANEL_RADIUS, argb(0xF2, PANEL_RGB));
+    cv.stroke_round((r.0 + 0.5, r.1 + 0.5, r.2 - 1.0, r.3 - 1.0), PANEL_RADIUS - 0.5, argb(0x30, 0xFFFFFF), 1.0);
 }
 
 /// Pinta os botões de uma barra: destaque no ativo, realce no hover, ícones.
-pub unsafe fn paint_buttons(
-    hdc: HDC,
+pub fn paint_buttons(
+    cv: &Canvas,
     buttons: &[(Button, Rect)],
     active: Option<Button>,
     hover: Option<Button>,
     current: Color,
 ) {
-    unsafe {
-        for (b, r) in buttons {
-            if Some(*b) == active {
-                fill_round(hdc, *r, ACCENT, 12);
-            } else if Some(*b) == hover {
-                fill_round(hdc, *r, PANEL_HOVER, 12);
-            }
-            draw_icon(hdc, *b, *r, current);
+    for (b, r) in buttons {
+        let is_active = Some(*b) == active;
+        let rr = rf(*r);
+        let inner = (rr.0 + 1.0, rr.1 + 1.0, rr.2 - 2.0, rr.3 - 2.0);
+        if is_active {
+            cv.fill_round(inner, BTN_RADIUS, argb(0xFF, ACCENT_RGB));
+        } else if Some(*b) == hover {
+            cv.fill_round(inner, BTN_RADIUS, argb(0x26, 0xFFFFFF));
         }
+        draw_icon(cv, *b, *r, current, is_active);
     }
 }
 
 /// Paleta: bolinhas com a cor; a cor ativa tem anel de destaque.
-pub unsafe fn paint_palette(hdc: HDC, panel: Rect, swatches: &[(Color, Rect)], current: Color) {
-    unsafe {
-        paint_panel(hdc, panel);
-        for (c, r) in swatches {
-            let brush = CreateSolidBrush(COLORREF(c.colorref()));
-            let pen = CreatePen(PS_SOLID, 1, COLORREF(RING));
-            let ob = SelectObject(hdc, HGDIOBJ(brush.0));
-            let op = SelectObject(hdc, HGDIOBJ(pen.0));
-            let _ = Ellipse(hdc, r.x, r.y, r.right(), r.bottom());
-            SelectObject(hdc, ob);
-            SelectObject(hdc, op);
-            let _ = DeleteObject(HGDIOBJ(brush.0));
-            let _ = DeleteObject(HGDIOBJ(pen.0));
-            if *c == current {
-                let ring = CreatePen(PS_SOLID, 2, COLORREF(INK));
-                let stock_null = GetStockObject(NULL_BRUSH);
-                let old_brush = SelectObject(hdc, stock_null);
-                let old_pen = SelectObject(hdc, HGDIOBJ(ring.0));
-                let _ = Ellipse(hdc, r.x - 4, r.y - 4, r.right() + 4, r.bottom() + 4);
-                SelectObject(hdc, old_pen);
-                SelectObject(hdc, old_brush);
-                let _ = DeleteObject(HGDIOBJ(ring.0));
-            }
+pub fn paint_palette(cv: &Canvas, panel: Rect, swatches: &[(Color, Rect)], current: Color) {
+    paint_panel(cv, panel);
+    for (c, r) in swatches {
+        let rr = rf(*r);
+        cv.fill_ellipse(rr, argb_from_colorref(c.colorref()));
+        cv.stroke_ellipse(rr, argb(0x66, 0xFFFFFF), 1.2);
+        if *c == current {
+            cv.stroke_ellipse((rr.0 - 3.5, rr.1 - 3.5, rr.2 + 7.0, rr.3 + 7.0), argb(0xFF, 0xFFFFFF), 2.0);
         }
     }
 }
 
-unsafe fn line(hdc: HDC, a: (i32, i32), b: (i32, i32)) {
-    unsafe {
-        let _ = MoveToEx(hdc, a.0, a.1, None);
-        let _ = LineTo(hdc, b.0, b.1);
-    }
-}
-
-/// Ícones desenhados com primitivas GDI, traço de 2 px em cor clara.
-unsafe fn draw_icon(hdc: HDC, b: Button, r: Rect, current: Color) {
-    unsafe {
-        let inset = 11;
-        let cx = r.x + r.w / 2;
-        let cy = r.y + r.h / 2;
-        let (x0, x1, y0, y1) = (r.x + inset, r.x + r.w - inset, r.y + inset, r.y + r.h - inset);
-        let ink = CreatePen(PS_SOLID, 2, COLORREF(INK));
-        let hollow_pen_old = SelectObject(hdc, HGDIOBJ(ink.0));
-        let null_brush = windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH);
-        let old_brush = SelectObject(hdc, null_brush);
-        match b {
-            Button::Pen => {
-                let pts = [
-                    POINT { x: x0, y: y1 },
-                    POINT { x: x0 + 5, y: y0 + 4 },
-                    POINT { x: cx, y: y1 - 4 },
-                    POINT { x: x1, y: y0 },
-                ];
-                let _ = Polyline(hdc, &pts);
-            }
-            Button::Line => line(hdc, (x0, y1), (x1, y0)),
-            Button::Arrow => {
-                line(hdc, (x0, y1), (x1, y0));
-                line(hdc, (x1, y0), (x1 - 7, y0 + 1));
-                line(hdc, (x1, y0), (x1 - 1, y0 + 7));
-            }
-            Button::Rect => {
-                let _ = Rectangle(hdc, x0, y0 + 2, x1, y1 - 2);
-            }
-            Button::Ellipse => {
-                let _ = Ellipse(hdc, x0, y0 + 2, x1, y1 - 2);
-            }
-            Button::Marker => {
-                draw::fill_alpha(hdc, Rect { x: x0, y: cy - 5, w: x1 - x0, h: 10 }, 0x0000_FFFF, 170);
-            }
-            Button::Text => {
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, COLORREF(INK));
-                let wide: Vec<u16> = "T".encode_utf16().collect();
-                let _ = TextOutW(hdc, cx - 5, cy - 9, &wide);
-            }
-            Button::Pixelate => {
-                for gy in 0..3 {
-                    for gx in 0..3 {
-                        if (gx + gy) % 2 == 0 {
-                            let sx = x0 + gx * 6;
-                            let sy = y0 + gy * 6;
-                            let _ = Rectangle(hdc, sx, sy, sx + 5, sy + 5);
-                        }
-                    }
+/// Ícones desenhados em vetor, traço de 2,2 px com pontas redondas.
+fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
+    let cx = r.x as f32 + r.w as f32 / 2.0;
+    let cy = r.y as f32 + r.h as f32 / 2.0;
+    let rgb = if active { INK_ACTIVE_RGB } else { INK_RGB };
+    let ink = argb(0xFF, rgb);
+    let w = 2.2;
+    let p = |dx: f32, dy: f32| (cx + dx, cy + dy);
+    match b {
+        Button::Pen => cv.curve(&[p(-8.0, 3.0), p(-3.0, -5.0), p(2.0, 4.0), p(8.0, -4.0)], ink, w),
+        Button::Line => cv.line(p(-7.0, 7.0), p(7.0, -7.0), ink, w),
+        Button::Arrow => {
+            cv.line(p(-7.0, 7.0), p(7.0, -7.0), ink, w);
+            cv.line(p(7.0, -7.0), p(-0.5, -7.0), ink, w);
+            cv.line(p(7.0, -7.0), p(7.0, 0.5), ink, w);
+        }
+        Button::Rect => cv.stroke_round((cx - 7.5, cy - 6.0, 15.0, 12.0), 3.0, ink, w),
+        Button::Ellipse => cv.stroke_ellipse((cx - 8.0, cy - 6.0, 16.0, 12.0), ink, w),
+        Button::Marker => cv.fill_round((cx - 8.0, cy - 3.0, 16.0, 8.0), 2.5, argb(0xDD, 0xFACC15)),
+        Button::Text => {
+            cv.line(p(-6.5, -6.0), p(6.5, -6.0), ink, w + 0.2);
+            cv.line(p(0.0, -6.0), p(0.0, 7.0), ink, w + 0.2);
+        }
+        Button::Pixelate => {
+            let (ox, oy) = (cx - 9.5, cy - 9.5);
+            for gy in 0..3 {
+                for gx in 0..3 {
+                    let alpha = if (gx + gy) % 2 == 0 { 0xFF } else { 0x66 };
+                    cv.fill_round((ox + gx as f32 * 7.0, oy + gy as f32 * 7.0, 5.0, 5.0), 1.2, argb(alpha, rgb));
                 }
             }
-            Button::Number => {
-                let _ = Ellipse(hdc, cx - 9, cy - 9, cx + 9, cy + 9);
-            }
-            Button::ColorSwatch => {
-                let brush = CreateSolidBrush(COLORREF(current.colorref()));
-                let old = SelectObject(hdc, HGDIOBJ(brush.0));
-                let _ = Ellipse(hdc, x0 + 1, y0 + 1, x1 - 1, y1 - 1);
-                SelectObject(hdc, old);
-                let _ = DeleteObject(HGDIOBJ(brush.0));
-            }
-            Button::Undo => {
-                line(hdc, (x1, cy), (x0 + 4, cy));
-                line(hdc, (x0 + 4, cy), (x0 + 9, cy - 5));
-                line(hdc, (x0 + 4, cy), (x0 + 9, cy + 5));
-            }
-            Button::Copy => {
-                let _ = Rectangle(hdc, x0, y0, x0 + 11, y0 + 11);
-                let _ = Rectangle(hdc, x0 + 6, y0 + 6, x1, y1);
-            }
-            Button::Save => {
-                let _ = Rectangle(hdc, x0, y0, x1, y1);
-                let _ = Rectangle(hdc, x0 + 4, y0, x1 - 4, y0 + 6);
-            }
-            Button::Close => {
-                line(hdc, (x0, y0), (x1, y1));
-                line(hdc, (x1, y0), (x0, y1));
-            }
         }
-        SelectObject(hdc, old_brush);
-        SelectObject(hdc, hollow_pen_old);
-        let _ = DeleteObject(HGDIOBJ(ink.0));
+        Button::Number => {
+            cv.stroke_ellipse((cx - 9.0, cy - 9.0, 18.0, 18.0), ink, w);
+            cv.line(p(-1.5, -3.5), p(1.0, -5.5), ink, w);
+            cv.line(p(1.0, -5.5), p(1.0, 5.0), ink, w);
+        }
+        Button::ColorSwatch => {
+            let rr = (cx - 9.0, cy - 9.0, 18.0, 18.0);
+            cv.fill_ellipse(rr, argb_from_colorref(current.colorref()));
+            cv.stroke_ellipse(rr, argb(0x99, 0xFFFFFF), 1.6);
+        }
+        Button::Undo => {
+            cv.curve(&[p(-8.0, 0.0), p(-1.0, -2.0), p(6.0, 1.0), p(7.0, 6.0)], ink, w);
+            cv.line(p(-8.0, 0.0), p(-3.0, -5.0), ink, w);
+            cv.line(p(-8.0, 0.0), p(-3.0, 5.0), ink, w);
+        }
+        Button::Copy => {
+            // Folha de trás (só a parte visível) e folha da frente.
+            cv.polyline(&[p(-3.0, 3.0), p(-8.0, 3.0), p(-8.0, -8.0), p(3.0, -8.0), p(3.0, -3.0)], ink, w);
+            cv.stroke_round((cx - 3.0, cy - 3.0, 11.0, 11.0), 2.5, ink, w);
+        }
+        Button::Save => {
+            cv.stroke_round((cx - 7.5, cy - 7.5, 15.0, 15.0), 3.0, ink, w);
+            cv.stroke_round((cx - 3.5, cy - 7.5, 7.0, 5.0), 1.5, ink, w - 0.4);
+            cv.stroke_round((cx - 4.5, cy + 1.0, 9.0, 6.5), 1.5, ink, w - 0.4);
+        }
+        Button::Close => {
+            cv.line(p(-6.0, -6.0), p(6.0, 6.0), ink, w + 0.2);
+            cv.line(p(6.0, -6.0), p(-6.0, 6.0), ink, w + 0.2);
+        }
     }
 }
 
