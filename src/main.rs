@@ -30,8 +30,8 @@ use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetP
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MB_ICONINFORMATION, MB_OK, MSG,
-    MessageBoxW, PostQuitMessage, RegisterClassW, SW_SHOWNORMAL, TranslateMessage, WM_COMMAND,
-    WM_DESTROY, WM_HOTKEY, WM_RBUTTONUP, WNDCLASSW, WS_POPUP,
+    MessageBoxW, PM_NOREMOVE, PeekMessageW, PostQuitMessage, RegisterClassW, SW_SHOWNORMAL,
+    TranslateMessage, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_RBUTTONUP, WNDCLASSW, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -98,6 +98,13 @@ fn message(text: &str) {
 }
 
 fn main() {
+    // Avisa o Windows já na primeira linha que o app tem fila de mensagens: isso encerra o
+    // cursor de "aplicativo iniciando" (seta com bolinha girando) em vez de esperá-lo estourar.
+    unsafe {
+        let mut m = MSG::default();
+        let _ = PeekMessageW(&mut m, None, 0, 0, PM_NOREMOVE);
+    }
+
     log::set_debug(std::env::args().any(|a| a == "--debug"));
 
     // Instância única: se já há uma rodando, a segunda sai sem fazer nada.
@@ -115,10 +122,14 @@ fn main() {
     // Desenho suavizado das barras de ferramentas.
     gfx::startup();
 
-    // Se o settings.json existe, ele manda em "iniciar com o Windows".
+    // Se o settings.json existe, ele manda em "iniciar com o Windows". Roda em segundo plano:
+    // chama o reg.exe, que pode demorar na primeira execução, e não deve atrasar a bandeja.
     let settings = Settings::load(&settings_path());
     if settings_path().exists() {
-        let _ = startup::set_enabled(settings.start_with_windows);
+        let want = settings.start_with_windows;
+        std::thread::spawn(move || {
+            let _ = startup::set_enabled(want);
+        });
     }
 
     unsafe {
