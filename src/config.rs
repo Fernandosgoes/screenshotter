@@ -50,7 +50,6 @@ pub struct Settings {
     pub stroke_width: u32,
     pub text_size: u32,
     pub default_color: Color,
-    pub text_background: bool,
 }
 
 impl Default for Settings {
@@ -61,7 +60,6 @@ impl Default for Settings {
             stroke_width: 3,
             text_size: 18,
             default_color: Color::Red,
-            text_background: false,
         }
     }
 }
@@ -93,7 +91,16 @@ mod tests {
         assert_eq!(s.stroke_width, 3);
         assert_eq!(s.text_size, 18);
         assert_eq!(s.default_color, Color::Red);
-        assert!(!s.text_background);
+    }
+
+    #[test]
+    fn old_settings_with_text_background_still_load() {
+        // Arquivos antigos tinham "text_background"; o campo foi removido e deve ser ignorado.
+        let dir = std::env::temp_dir().join("shot_cfg_old");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("settings.json");
+        std::fs::write(&p, r#"{ "stroke_width": 5, "text_background": true }"#).unwrap();
+        assert_eq!(Settings::load(&p).stroke_width, 5);
     }
 
     #[test]

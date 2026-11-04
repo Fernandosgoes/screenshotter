@@ -5,14 +5,14 @@
 //! enviar mensagens síncronas (SetWindowPos, diálogos modais).
 
 use crate::capture::{self, Capture};
-use crate::config::Settings;
+use crate::config::{Color, Settings};
 use crate::draw;
-use crate::editor::{Editor, Interaction, Tool};
+use crate::editor::{Editor, TEXT_MIN_W, TEXT_PAD, Tool};
 use crate::export;
 use crate::geom::{Point, Rect, dimension_label};
-use crate::gfx::{Canvas, argb};
+use crate::gfx::{Canvas, argb, argb_from_colorref};
 use crate::log;
-use crate::model::Annotation;
+use crate::model::{Annotation, text_line_height};
 use crate::toolbar::{self, Button};
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -21,17 +21,17 @@ use std::time::Instant;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC,
-    CreateDIBSection, CreatePen, DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE,
+    CreateDIBSection, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE,
     DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint, GetStockObject, HBITMAP, HDC,
-    HGDIOBJ, InvalidateRect, NULL_BRUSH, PAINTSTRUCT, PS_SOLID, Rectangle, RGBQUAD,
-    SRCCOPY, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
+    HGDIOBJ, InvalidateRect, NULL_BRUSH, PAINTSTRUCT, PS_DASH, PS_SOLID, Rectangle, RGBQUAD,
+    SRCCOPY, SelectObject, SetBkMode, SetDIBitsToDevice, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_DELETE, VK_ESCAPE, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, LoadCursorW,
+    CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HWND_TOPMOST, IDC_ARROW, LoadCursorW,
     RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetCursor, SetForegroundWindow,
     SetWindowPos, ShowWindow, WM_CHAR, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     WM_MOUSEWHEEL, WM_PAINT, WM_SETCURSOR, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
@@ -39,8 +39,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{PCWSTR, w};
 
 const CLASS: PCWSTR = w!("ScreenshotterOverlay");
-/// Raio das alças da seleção, em pixels.
-const HANDLE_R: f32 = 4.5;
+/// Metade do lado dos quadradinhos das alças da seleção, em pixels.
+const HANDLE_HALF: i32 = 3;
 /// MK_SHIFT do WM_MOUSEMOVE (wParam), valor fixo do Win32.
 const MK_SHIFT_FLAG: usize = 0x0004;
 
@@ -111,7 +111,7 @@ pub fn create() -> windows::core::Result<HWND> {
             style: CS_DBLCLKS,
             lpfnWndProc: Some(wnd_proc),
             hInstance: hinst,
-            hCursor: LoadCursorW(None, IDC_CROSS)?,
+            hCursor: LoadCursorW(None, IDC_ARROW)?,
             lpszClassName: CLASS,
             ..Default::default()
         };
@@ -221,27 +221,22 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             SESSION.with(|s| {
                 if let Some(sess) = s.borrow_mut().as_mut() {
                     sess.editor.on_mouse_move(p, shift);
-                    sess.hover = sess.editor.sel.and_then(|sel| {
-                        toolbar::hit(&toolbar::layout(sel, sess.editor.screen_rect()), p)
-                    });
+                    sess.hover = match sess.editor.sel {
+                        Some(sel) if sess.editor.toolbar_visible() => {
+                            toolbar::hit(&toolbar::layout(sel, sess.editor.screen_rect()), p)
+                        }
+                        _ => None,
+                    };
                 }
             });
             redraw(hwnd);
             LRESULT(0)
         }
         WM_SETCURSOR => {
-            // Cruz só enquanto a seleção está sendo criada; depois, seta normal.
-            // Sempre definimos o cursor aqui: evita o "carregando" do Windows ao iniciar o app.
-            let crosshair = SESSION.with(|s| match s.try_borrow() {
-                Ok(g) => g.as_ref().is_none_or(|sess| {
-                    sess.editor.sel.is_none()
-                        || matches!(sess.editor.state, Interaction::Selecting { .. })
-                }),
-                Err(_) => true,
-            });
+            // Cursor sempre a seta normal (como no Lightshot). Definimos aqui de propósito:
+            // evita o "carregando" que o Windows mostra logo depois de iniciar o app.
             unsafe {
-                let id = if crosshair { IDC_CROSS } else { IDC_ARROW };
-                if let Ok(cursor) = LoadCursorW(None, id) {
+                if let Ok(cursor) = LoadCursorW(None, IDC_ARROW) {
                     SetCursor(Some(cursor));
                 }
             }
@@ -303,7 +298,9 @@ fn on_mouse_down(p: Point) {
         let mut g = s.borrow_mut();
         let sess = g.as_mut()?;
         let e = &mut sess.editor;
-        if let Some(sel) = e.sel {
+        // As barras só existem (e só recebem clique) com a seleção pronta.
+        let visible = e.toolbar_visible();
+        if let (true, Some(sel)) = (visible, e.sel) {
             let l = toolbar::layout(sel, e.screen_rect());
             if let Some(b) = toolbar::hit(&l, p) {
                 return match b {
@@ -387,7 +384,10 @@ fn on_char(c: u32) {
         let mut g = s.borrow_mut();
         let Some(sess) = g.as_mut() else { return };
         let e = &mut sess.editor;
-        if e.text.is_some() {
+        if ch == '\r' {
+            // Enter finaliza o texto; Shift+Enter quebra a linha.
+            e.on_enter(key_down(VK_SHIFT.0 as i32));
+        } else if e.text.is_some() {
             e.on_char(ch);
         } else if ch.is_ascii_alphabetic() {
             e.on_key_letter(ch);
@@ -408,24 +408,32 @@ fn paint_to(hdc: HDC) {
             let b = sess.back.dc;
             let _ = BitBlt(b, 0, 0, w, h, Some(sess.dim.dc), 0, 0, SRCCOPY);
             if let Some(sel) = e.sel {
-                let _ = BitBlt(b, sel.x, sel.y, sel.w, sel.h, Some(sess.bright.dc), sel.x, sel.y, SRCCOPY);
+                if e.doc.items().iter().any(|a| matches!(a, Annotation::Pixelate { .. })) {
+                    // Borrão ao vivo: mostra a seleção já pixelada, igual à exportação.
+                    let (r, px) = export::crop_pixelated(&e.capture, sel, &e.doc);
+                    blit_bgra(b, r, &px);
+                } else {
+                    let _ = BitBlt(b, sel.x, sel.y, sel.w, sel.h, Some(sess.bright.dc), sel.x, sel.y, SRCCOPY);
+                }
             }
-            draw::paint_annotations(b, e.doc.items(), 0, 0, true);
+            draw::paint_annotations(b, e.doc.items(), 0, 0, false);
+            // Canvas suavizado (GDI+) para caixa de texto, etiqueta e barras.
+            let canvas = Canvas::from_hdc(b);
             if let Some(t) = &e.text {
                 let a = Annotation::Text {
                     at: t.at,
                     text: t.buf.clone(),
                     color: e.color,
                     size: e.text_size,
-                    background: e.text_background,
                 };
                 draw::paint_annotation(b, &a, 0, 0, false);
+                if let Some(cv) = canvas.as_ref() {
+                    paint_text_box(b, cv, t.at, &t.buf, e.text_size, e.color);
+                }
             }
-            // Canvas suavizado (GDI+) para alças, etiqueta e barras.
-            let canvas = Canvas::from_hdc(b);
             if let Some(sel) = e.sel {
                 paint_selection(b, canvas.as_ref(), sel, e.capture.width);
-                if let Some(cv) = canvas.as_ref() {
+                if let (true, Some(cv)) = (e.toolbar_visible(), canvas.as_ref()) {
                     let l = toolbar::layout(sel, e.screen_rect());
                     let (v, hz) = toolbar::button_rects(&l);
                     let active = active_button(e.tool);
@@ -467,47 +475,115 @@ fn active_button(t: Tool) -> Button {
     }
 }
 
-/// Moldura contínua, alças redondas e etiqueta de medidas em formato de pílula.
+/// Mostra pixels BGRA (top-down) no DC, com o canto superior esquerdo em `r`.
+unsafe fn blit_bgra(hdc: HDC, r: Rect, px: &[u8]) {
+    if r.w <= 0 || r.h <= 0 || px.len() < (r.w * r.h * 4) as usize {
+        return;
+    }
+    let bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: r.w,
+            biHeight: -r.h,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        bmiColors: [RGBQUAD::default()],
+    };
+    unsafe {
+        SetDIBitsToDevice(
+            hdc,
+            r.x,
+            r.y,
+            r.w as u32,
+            r.h as u32,
+            0,
+            0,
+            0,
+            r.h as u32,
+            px.as_ptr() as *const c_void,
+            &bmi,
+            DIB_RGB_COLORS,
+        );
+    }
+}
+
+/// Caixa de edição do texto: retângulo arredondado visível mesmo vazio, e cursor de digitação.
+unsafe fn paint_text_box(hdc: HDC, cv: &Canvas, at: Point, buf: &str, size: u32, color: Color) {
+    unsafe {
+        let (widest, last_w) = draw::measure_text(hdc, buf, size);
+        let line_h = text_line_height(size);
+        let lines = buf.split('\n').count() as i32;
+        let w = (widest + 2 * TEXT_PAD + 4).max(TEXT_MIN_W);
+        let h = (lines * line_h + 2 * TEXT_PAD).max(line_h + 2 * TEXT_PAD);
+        let r = (
+            (at.x - TEXT_PAD) as f32,
+            (at.y - TEXT_PAD) as f32,
+            w as f32,
+            h as f32,
+        );
+        cv.fill_round(r, 5.0, argb(0x26, 0xFFFFFF));
+        cv.stroke_round(r, 5.0, argb(0xFF, 0x6366F1), 1.6);
+        // Cursor no fim da última linha.
+        let cx = (at.x + last_w + 1) as f32;
+        let top = (at.y + (lines - 1) * line_h) as f32;
+        cv.line((cx, top + 1.0), (cx, top + line_h as f32 - 3.0), argb_from_colorref(color.colorref()), 1.6);
+    }
+}
+
+/// Moldura pontilhada (preto e branco alternados), alças quadradas pretas e etiqueta
+/// de medidas, como no Lightshot.
 unsafe fn paint_selection(hdc: HDC, cv: Option<&Canvas>, sel: Rect, screen_w: i32) {
     unsafe {
-        // Traçado contínuo estilo Lightshot: linha escura por fora, branca por dentro.
-        let outer = CreatePen(PS_SOLID, 1, COLORREF(0x0000_0000));
-        let inner = CreatePen(PS_SOLID, 1, COLORREF(0x00FF_FFFF));
-        let old_pen = SelectObject(hdc, HGDIOBJ(outer.0));
+        let white = CreatePen(PS_SOLID, 1, COLORREF(0x00FF_FFFF));
+        let dots = CreatePen(PS_DASH, 1, COLORREF(0x0000_0000));
+        let old_pen = SelectObject(hdc, HGDIOBJ(white.0));
         let old_brush = SelectObject(hdc, HGDIOBJ(GetStockObject(NULL_BRUSH).0));
-        let _ = Rectangle(hdc, sel.x - 1, sel.y - 1, sel.right() + 1, sel.bottom() + 1);
-        SelectObject(hdc, HGDIOBJ(inner.0));
+        // Linha branca contínua por baixo, preta tracejada por cima: alterna preto e branco.
         let _ = Rectangle(hdc, sel.x, sel.y, sel.right(), sel.bottom());
+        SetBkMode(hdc, TRANSPARENT);
+        SelectObject(hdc, HGDIOBJ(dots.0));
+        let _ = Rectangle(hdc, sel.x, sel.y, sel.right(), sel.bottom());
+
+        // Alças: quadradinhos pretos com borda branca fina.
+        let black = CreateSolidBrush(COLORREF(0x0000_0000));
+        SelectObject(hdc, HGDIOBJ(white.0));
+        SelectObject(hdc, HGDIOBJ(black.0));
+        for (_, p) in sel.handles() {
+            let _ = Rectangle(
+                hdc,
+                p.x - HANDLE_HALF,
+                p.y - HANDLE_HALF,
+                p.x + HANDLE_HALF + 1,
+                p.y + HANDLE_HALF + 1,
+            );
+        }
         SelectObject(hdc, old_pen);
         SelectObject(hdc, old_brush);
-        let _ = DeleteObject(HGDIOBJ(outer.0));
-        let _ = DeleteObject(HGDIOBJ(inner.0));
+        let _ = DeleteObject(HGDIOBJ(white.0));
+        let _ = DeleteObject(HGDIOBJ(dots.0));
+        let _ = DeleteObject(HGDIOBJ(black.0));
 
         let Some(cv) = cv else { return };
 
-        // Alças: bolinhas brancas com contorno escuro suave.
-        for (_, p) in sel.handles() {
-            let r = (p.x as f32 - HANDLE_R, p.y as f32 - HANDLE_R, HANDLE_R * 2.0, HANDLE_R * 2.0);
-            cv.fill_ellipse(r, argb(0xFF, 0xFFFFFF));
-            cv.stroke_ellipse(r, argb(0xB0, 0x0F172A), 1.4);
-        }
-
         // Etiqueta de medidas: acima do canto superior esquerdo, ou dentro se não couber.
         let text = dimension_label(sel);
-        let label_w = text.len() as i32 * 8 + 18;
-        let label_h = 22;
+        let label_w = text.len() as i32 * 8 + 14;
+        let label_h = 20;
         let mut lx = sel.x;
-        let mut ly = sel.y - label_h - 8;
+        let mut ly = sel.y - label_h - 6;
         if ly < 0 {
-            ly = sel.y + 8;
+            ly = sel.y + 6;
         }
         if lx + label_w > screen_w {
             lx = (screen_w - label_w).max(0);
         }
         cv.fill_round(
             (lx as f32, ly as f32, label_w as f32, label_h as f32),
-            label_h as f32 / 2.0,
-            argb(0xE6, 0x0F172A),
+            5.0,
+            argb(0xF0, 0x262626),
         );
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, COLORREF(0x00FF_FFFF));

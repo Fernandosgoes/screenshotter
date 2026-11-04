@@ -25,32 +25,44 @@ use windows::core::PCWSTR;
 /// Tamanho do bloco de pixelização, em pixels da imagem.
 const PIXEL_BLOCK: u32 = 10;
 
-/// Imagem final da seleção, BGRA `sel.w × sel.h`, com pixelização e formas aplicadas.
-pub fn compose(cap: &Capture, sel: Rect, doc: &Document) -> Vec<u8> {
+/// Recorte da seleção (BGRA) com a pixelização já aplicada, sem as formas vetoriais.
+/// Devolve a seleção recortada aos limites da captura e os pixels. A tela usa isto para
+/// mostrar o borrão ao vivo, e a exportação parte do mesmo resultado.
+pub fn crop_pixelated(cap: &Capture, sel: Rect, doc: &Document) -> (Rect, Vec<u8>) {
     let sel = sel.clamp_to(Rect { x: 0, y: 0, w: cap.width, h: cap.height });
     let (w, h) = (sel.w, sel.h);
     let stride = (w * 4) as usize;
-    let mut out = vec![0u8; stride * h as usize];
+    let mut out = vec![0u8; stride * h.max(0) as usize];
     if w <= 0 || h <= 0 {
-        return out;
+        return (sel, out);
     }
 
-    // 1) Recorte original.
+    // Recorte original.
     let cap_stride = (cap.width * 4) as usize;
     for row in 0..h as usize {
         let src = (sel.y as usize + row) * cap_stride + sel.x as usize * 4;
         out[row * stride..(row + 1) * stride].copy_from_slice(&cap.pixels[src..src + stride]);
     }
 
-    // 2) Pixelização sobrescreve os pixels antes de qualquer outra coisa.
+    // A pixelização sobrescreve os pixels originais (irreversível).
     for a in doc.items() {
         if let Annotation::Pixelate { r } = a {
             let rel = Rect { x: r.x - sel.x, y: r.y - sel.y, w: r.w, h: r.h };
             pixelate_region(&mut out, stride, w, h, rel, PIXEL_BLOCK);
         }
     }
+    (sel, out)
+}
 
-    // 3) Formas vetoriais, desenhadas por GDI num DIB com a mesma imagem.
+/// Imagem final da seleção, BGRA `sel.w × sel.h`, com pixelização e formas aplicadas.
+pub fn compose(cap: &Capture, sel: Rect, doc: &Document) -> Vec<u8> {
+    let (sel, mut out) = crop_pixelated(cap, sel, doc);
+    let (w, h) = (sel.w, sel.h);
+    if w <= 0 || h <= 0 {
+        return out;
+    }
+
+    // Formas vetoriais, desenhadas por GDI num DIB com a mesma imagem.
     draw_vectors(&mut out, w, h, doc.items(), sel);
 
     // Canal alfa sempre opaco no arquivo final.
@@ -205,6 +217,32 @@ mod tests {
         assert_eq!(out.len(), 16);
         assert!(out.chunks(4).all(|p| p[0] == 127 || p[0] == 128));
         assert_eq!(out[3], 255);
+    }
+
+    #[test]
+    fn crop_pixelated_hides_original_pixels_for_live_preview() {
+        // Palavra "sensível": faixa alternando preto e branco, ilegível depois do borrão.
+        let mut cap = Capture::empty(20, 1);
+        for x in 0..20usize {
+            let v = if x % 2 == 0 { 0 } else { 255 };
+            cap.pixels[x * 4..x * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+        }
+        let mut doc = Document::new();
+        doc.push(Annotation::Pixelate { r: Rect { x: 0, y: 0, w: 20, h: 1 } });
+        let (sel, px) = crop_pixelated(&cap, Rect { x: 0, y: 0, w: 20, h: 1 }, &doc);
+        assert_eq!(sel, Rect { x: 0, y: 0, w: 20, h: 1 });
+        // Dentro de cada bloco de 10 px todos os pixels ficam iguais (quadriculado).
+        assert!(px[..40].chunks(4).all(|p| p[0] == px[0]));
+        assert!(px[40..80].chunks(4).all(|p| p[0] == px[40]));
+        assert!(px.chunks(4).all(|p| p[0] != 0 && p[0] != 255), "nenhum pixel original resta");
+    }
+
+    #[test]
+    fn crop_pixelated_without_pixelate_is_plain_crop() {
+        let mut cap = Capture::empty(2, 1);
+        cap.pixels = vec![1, 2, 3, 255, 9, 8, 7, 255];
+        let (_, px) = crop_pixelated(&cap, Rect { x: 1, y: 0, w: 1, h: 1 }, &Document::new());
+        assert_eq!(&px[..3], &[9, 8, 7]);
     }
 
     #[test]

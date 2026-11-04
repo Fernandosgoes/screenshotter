@@ -4,11 +4,15 @@
 use crate::capture::Capture;
 use crate::config::{Color, Settings};
 use crate::geom::{self, Handle, Point, Rect};
-use crate::model::{Annotation, Document};
+use crate::model::{Annotation, Document, bounds_of, text_line_height};
 
 /// Tolerância para pegar uma alça da seleção, em pixels.
 pub const HANDLE_TOL: i32 = 6;
 const MIN_SEL: i32 = 2;
+/// Margem entre o texto e a borda da caixa de edição.
+pub const TEXT_PAD: i32 = 5;
+/// Largura mínima da caixa de edição de texto (visível mesmo vazia).
+pub const TEXT_MIN_W: i32 = 120;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -47,7 +51,6 @@ pub struct Editor {
     pub color: Color,
     pub stroke: u32,
     pub text_size: u32,
-    pub text_background: bool,
     pub palette_open: bool,
     pub state: Interaction,
     pub text: Option<TextEdit>,
@@ -64,7 +67,6 @@ impl Editor {
             color: settings.default_color,
             stroke: settings.stroke_width,
             text_size: settings.text_size,
-            text_background: settings.text_background,
             palette_open: false,
             state: Interaction::Idle,
             text: None,
@@ -116,23 +118,43 @@ impl Editor {
         self.sel.is_some()
     }
 
+    /// As barras de ferramentas só aparecem com a seleção pronta (como no Lightshot):
+    /// ficam escondidas enquanto a área está sendo arrastada ou redimensionada.
+    pub fn toolbar_visible(&self) -> bool {
+        self.sel.is_some()
+            && !matches!(
+                self.state,
+                Interaction::Selecting { .. } | Interaction::ResizingSel { .. }
+            )
+    }
+
+    /// Caixa de edição do texto (com margem), visível mesmo com o texto vazio.
+    pub fn text_box(&self) -> Option<Rect> {
+        let t = self.text.as_ref()?;
+        let b = bounds_of(&Annotation::Text {
+            at: t.at,
+            text: t.buf.clone(),
+            color: self.color,
+            size: self.text_size,
+        });
+        let min_h = text_line_height(self.text_size);
+        Some(Rect {
+            x: t.at.x - TEXT_PAD,
+            y: t.at.y - TEXT_PAD,
+            w: (b.w + 2 * TEXT_PAD).max(TEXT_MIN_W),
+            h: (b.h + 2 * TEXT_PAD).max(min_h + 2 * TEXT_PAD),
+        })
+    }
+
     pub fn on_mouse_down(&mut self, p: Point) {
         self.palette_open = false;
 
         // Clicar fora da caixa de texto finaliza o texto.
-        if let Some(t) = &self.text {
-            let approx = crate::model::bounds_of(&Annotation::Text {
-                at: t.at,
-                text: t.buf.clone(),
-                color: self.color,
-                size: self.text_size,
-                background: self.text_background,
-            });
-            if !approx.contains(p) {
-                self.commit_text();
-            } else {
+        if let Some(boxr) = self.text_box() {
+            if boxr.contains(p) {
                 return;
             }
+            self.commit_text();
         }
 
         let Some(sel) = self.sel else {
@@ -253,8 +275,23 @@ impl Editor {
                     text: t.buf,
                     color: self.color,
                     size: self.text_size,
-                    background: self.text_background,
                 });
+            }
+        }
+    }
+
+    /// Enter na caixa de texto: finaliza e cola o texto. Shift+Enter quebra a linha.
+    /// Retorna true se havia uma caixa de texto aberta (a tecla foi consumida).
+    pub fn on_enter(&mut self, shift: bool) -> bool {
+        match self.text.as_mut() {
+            None => false,
+            Some(t) => {
+                if shift {
+                    t.buf.push('\n');
+                } else {
+                    self.commit_text();
+                }
+                true
             }
         }
     }
@@ -297,8 +334,8 @@ impl Editor {
 
     pub fn on_char(&mut self, c: char) {
         if let Some(t) = self.text.as_mut() {
+            // Enter/Shift+Enter vêm por on_enter (precisa saber se o Shift está apertado).
             match c {
-                '\r' | '\n' => t.buf.push('\n'),
                 '\u{8}' => {
                     t.buf.pop();
                 }
@@ -395,6 +432,63 @@ mod tests {
         e.on_char('i');
         e.on_mouse_down(Point { x: 700, y: 500 });
         assert!(matches!(&e.doc.items()[0], Annotation::Text { text, .. } if text == "oi"));
+    }
+
+    #[test]
+    fn enter_commits_text_and_closes_box() {
+        let mut e = Editor::test_new(800, 600);
+        e.sel = Some(Rect { x: 0, y: 0, w: 800, h: 600 });
+        e.set_tool(Tool::Text);
+        e.on_mouse_down(Point { x: 20, y: 20 });
+        e.on_char('o');
+        e.on_char('i');
+        assert!(e.on_enter(false));
+        assert!(e.text.is_none());
+        assert!(matches!(&e.doc.items()[0], Annotation::Text { text, .. } if text == "oi"));
+    }
+
+    #[test]
+    fn shift_enter_adds_line_break_and_keeps_editing() {
+        let mut e = Editor::test_new(800, 600);
+        e.sel = Some(Rect { x: 0, y: 0, w: 800, h: 600 });
+        e.set_tool(Tool::Text);
+        e.on_mouse_down(Point { x: 20, y: 20 });
+        e.on_char('a');
+        assert!(e.on_enter(true));
+        e.on_char('b');
+        assert!(e.text.is_some());
+        e.on_enter(false);
+        assert!(matches!(&e.doc.items()[0], Annotation::Text { text, .. } if text == "a\nb"));
+    }
+
+    #[test]
+    fn enter_without_text_box_is_not_consumed() {
+        let mut e = Editor::test_new(800, 600);
+        assert!(!e.on_enter(false));
+        assert!(!e.on_enter(true));
+    }
+
+    #[test]
+    fn empty_text_box_is_visible_and_click_inside_keeps_it() {
+        let mut e = Editor::test_new(800, 600);
+        e.sel = Some(Rect { x: 0, y: 0, w: 800, h: 600 });
+        e.set_tool(Tool::Text);
+        e.on_mouse_down(Point { x: 100, y: 100 });
+        let b = e.text_box().expect("caixa aberta");
+        assert!(b.w >= 120 && b.h > 0);
+        e.on_mouse_down(Point { x: 150, y: 110 }); // dentro da caixa
+        assert!(e.text.is_some());
+    }
+
+    #[test]
+    fn toolbar_hidden_while_selecting_and_shown_after_release() {
+        let mut e = Editor::test_new(800, 600);
+        assert!(!e.toolbar_visible());
+        e.on_mouse_down(Point { x: 10, y: 10 });
+        e.on_mouse_move(Point { x: 200, y: 150 }, false);
+        assert!(!e.toolbar_visible(), "barra escondida durante o arraste");
+        e.on_mouse_up();
+        assert!(e.toolbar_visible(), "barra aparece ao soltar o mouse");
     }
 
     #[test]

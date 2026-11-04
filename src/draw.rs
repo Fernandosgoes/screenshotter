@@ -3,16 +3,17 @@
 
 use crate::config::Color;
 use crate::geom::{Point, Rect};
-use crate::model::{Annotation, NUMBER_RADIUS};
+use crate::model::{Annotation, NUMBER_RADIUS, text_line_height};
 use std::ffi::c_void;
 use std::ptr::null_mut;
-use windows::Win32::Foundation::{POINT, RECT};
+use windows::Win32::Foundation::{POINT, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_OVER, AlphaBlend, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, CLEARTYPE_QUALITY,
     CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS,
-    DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, Ellipse, GetStockObject,
+    DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, Ellipse,
+    GetStockObject, GetTextExtentPoint32W,
     HDC, HGDIOBJ, LineTo, MoveToEx, NULL_BRUSH, Polyline, PS_SOLID, Rectangle, RGBQUAD,
-    SelectObject, SetBkColor, SetBkMode, SetTextColor, TextOutW, TRANSPARENT, OPAQUE,
+    SelectObject, SetBkMode, SetTextColor, TextOutW, TRANSPARENT,
 };
 use windows::core::w;
 
@@ -159,8 +160,8 @@ pub unsafe fn paint_annotation(hdc: HDC, a: &Annotation, dx: i32, dy: i32, hint_
             Annotation::Marker { r, color } => {
                 fill_alpha(hdc, shr(*r), color.colorref(), 102);
             }
-            Annotation::Text { at, text, color, size, background } => {
-                draw_text(hdc, sh(*at), text, *color, *size, *background);
+            Annotation::Text { at, text, color, size } => {
+                draw_text(hdc, sh(*at), text, *color, *size);
             }
             Annotation::Pixelate { r } => {
                 if hint_pixelate {
@@ -216,24 +217,42 @@ unsafe fn create_font(size: i32) -> windows::Win32::Graphics::Gdi::HFONT {
     }
 }
 
-unsafe fn draw_text(hdc: HDC, at: Point, text: &str, color: Color, size: u32, background: bool) {
+unsafe fn draw_text(hdc: HDC, at: Point, text: &str, color: Color, size: u32) {
     unsafe {
         let font = create_font(size as i32);
         let old_font = SelectObject(hdc, HGDIOBJ(font.0));
         SetTextColor(hdc, windows::Win32::Foundation::COLORREF(color.colorref()));
-        if background {
-            SetBkMode(hdc, OPAQUE);
-            SetBkColor(hdc, windows::Win32::Foundation::COLORREF(0x00FF_FFFF));
-        } else {
-            SetBkMode(hdc, TRANSPARENT);
-        }
-        let line_h = size as i32 * 12 / 10 + 2;
+        SetBkMode(hdc, TRANSPARENT);
+        let line_h = text_line_height(size);
         for (i, line) in text.split('\n').enumerate() {
             let wide: Vec<u16> = line.encode_utf16().collect();
             let _ = TextOutW(hdc, at.x, at.y + i as i32 * line_h, &wide);
         }
         SelectObject(hdc, old_font);
         let _ = DeleteObject(HGDIOBJ(font.0));
+    }
+}
+
+/// Mede o texto com a mesma fonte usada ao desenhar. Devolve (largura da linha mais larga,
+/// largura da última linha), em pixels; serve para a caixa de edição e o cursor.
+pub unsafe fn measure_text(hdc: HDC, text: &str, size: u32) -> (i32, i32) {
+    unsafe {
+        let font = create_font(size as i32);
+        let old_font = SelectObject(hdc, HGDIOBJ(font.0));
+        let width_of = |line: &str| {
+            let wide: Vec<u16> = line.encode_utf16().collect();
+            let mut sz = SIZE::default();
+            if wide.is_empty() || !GetTextExtentPoint32W(hdc, &wide, &mut sz).as_bool() {
+                0
+            } else {
+                sz.cx
+            }
+        };
+        let widest = text.split('\n').map(width_of).max().unwrap_or(0);
+        let last = text.rsplit('\n').next().map(width_of).unwrap_or(0);
+        SelectObject(hdc, old_font);
+        let _ = DeleteObject(HGDIOBJ(font.0));
+        (widest, last)
     }
 }
 

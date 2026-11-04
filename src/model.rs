@@ -17,9 +17,14 @@ pub enum Annotation {
     Rect { r: Rect, color: Color, width: u32 },
     Ellipse { r: Rect, color: Color, width: u32 },
     Marker { r: Rect, color: Color },
-    Text { at: Point, text: String, color: Color, size: u32, background: bool },
+    Text { at: Point, text: String, color: Color, size: u32 },
     Pixelate { r: Rect },
     Number { center: Point, n: u32, color: Color },
+}
+
+/// Altura de uma linha de texto para o tamanho de fonte dado (usada ao desenhar e medir).
+pub fn text_line_height(size: u32) -> i32 {
+    size as i32 * 12 / 10 + 2
 }
 
 /// Limites aproximados do objeto, usados para seleção e pixelização.
@@ -48,7 +53,7 @@ pub fn bounds_of(a: &Annotation) -> Rect {
                 x: at.x,
                 y: at.y,
                 w: (longest * size * 6 / 10).max(1),
-                h: (lines * size * 2).max(1),
+                h: (lines * text_line_height(size as u32)).max(1),
             }
         }
         Annotation::Number { center, .. } => Rect {

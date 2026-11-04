@@ -1,21 +1,21 @@
 ﻿//! Barras de ícones (PRD F7) e paleta de 6 cores (F11).
-//! Visual: painéis escuros arredondados com sombra e borda sutil, botões de 40 px,
-//! destaque em indigo no botão ativo e realce no hover. Ícones com traço arredondado.
+//! Visual: painéis escuros compactos e arredondados com sombra e borda sutil, botões de
+//! 30 px, destaque em indigo no botão ativo e realce no hover. Ícones com traço arredondado.
 //! Layout puro + pintura suavizada (GDI+, ver gfx.rs).
 
 use crate::config::Color;
 use crate::geom::{BarLayout, GAP, Point, Rect, layout_bars, shift_inside};
 use crate::gfx::{Canvas, RectF, argb, argb_from_colorref};
 
-/// Tamanho de um botão, em pixels.
-pub const BTN: i32 = 40;
+/// Tamanho de um botão, em pixels (compacto, parecido com o do Lightshot).
+pub const BTN: i32 = 30;
 /// Margem interna do painel em volta dos botões.
-pub const PAD: i32 = 6;
-const SWATCH: i32 = 24;
-const SWATCH_GAP: i32 = 6;
+pub const PAD: i32 = 4;
+const SWATCH: i32 = 20;
+const SWATCH_GAP: i32 = 5;
 /// Raio dos cantos do painel e dos botões.
-const PANEL_RADIUS: f32 = 18.0;
-const BTN_RADIUS: f32 = 12.0;
+const PANEL_RADIUS: f32 = 12.0;
+const BTN_RADIUS: f32 = 8.0;
 
 // Cores em 0xRRGGBB (o alfa é aplicado em cada uso).
 const PANEL_RGB: u32 = 0x0F172A; // slate-900
@@ -164,14 +164,18 @@ pub fn paint_palette(cv: &Canvas, panel: Rect, swatches: &[(Color, Rect)], curre
     }
 }
 
-/// Ícones desenhados em vetor, traço de 2,2 px com pontas redondas.
+/// Ícones desenhados em vetor, com pontas redondas. As coordenadas abaixo foram
+/// desenhadas para um botão de 40 px e são escaladas para o tamanho real do botão.
 fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
     let cx = r.x as f32 + r.w as f32 / 2.0;
     let cy = r.y as f32 + r.h as f32 / 2.0;
+    let s = BTN as f32 / 40.0;
     let rgb = if active { INK_ACTIVE_RGB } else { INK_RGB };
     let ink = argb(0xFF, rgb);
-    let w = 2.2;
-    let p = |dx: f32, dy: f32| (cx + dx, cy + dy);
+    let w = (2.2 * s).max(1.7);
+    let p = |dx: f32, dy: f32| (cx + dx * s, cy + dy * s);
+    // Retângulo (x, y, largura, altura) relativo ao centro do botão.
+    let q = |x: f32, y: f32, ww: f32, hh: f32| (cx + x * s, cy + y * s, ww * s, hh * s);
     match b {
         Button::Pen => cv.curve(&[p(-8.0, 3.0), p(-3.0, -5.0), p(2.0, 4.0), p(8.0, -4.0)], ink, w),
         Button::Line => cv.line(p(-7.0, 7.0), p(7.0, -7.0), ink, w),
@@ -180,31 +184,31 @@ fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
             cv.line(p(7.0, -7.0), p(-0.5, -7.0), ink, w);
             cv.line(p(7.0, -7.0), p(7.0, 0.5), ink, w);
         }
-        Button::Rect => cv.stroke_round((cx - 7.5, cy - 6.0, 15.0, 12.0), 3.0, ink, w),
-        Button::Ellipse => cv.stroke_ellipse((cx - 8.0, cy - 6.0, 16.0, 12.0), ink, w),
-        Button::Marker => cv.fill_round((cx - 8.0, cy - 3.0, 16.0, 8.0), 2.5, argb(0xDD, 0xFACC15)),
+        Button::Rect => cv.stroke_round(q(-7.5, -6.0, 15.0, 12.0), 3.0 * s, ink, w),
+        Button::Ellipse => cv.stroke_ellipse(q(-8.0, -6.0, 16.0, 12.0), ink, w),
+        Button::Marker => cv.fill_round(q(-8.0, -3.0, 16.0, 8.0), 2.5 * s, argb(0xDD, 0xFACC15)),
         Button::Text => {
-            cv.line(p(-6.5, -6.0), p(6.5, -6.0), ink, w + 0.2);
-            cv.line(p(0.0, -6.0), p(0.0, 7.0), ink, w + 0.2);
+            cv.line(p(-6.5, -6.0), p(6.5, -6.0), ink, w);
+            cv.line(p(0.0, -6.0), p(0.0, 7.0), ink, w);
         }
         Button::Pixelate => {
-            let (ox, oy) = (cx - 9.5, cy - 9.5);
             for gy in 0..3 {
                 for gx in 0..3 {
                     let alpha = if (gx + gy) % 2 == 0 { 0xFF } else { 0x66 };
-                    cv.fill_round((ox + gx as f32 * 7.0, oy + gy as f32 * 7.0, 5.0, 5.0), 1.2, argb(alpha, rgb));
+                    let sq = q(-9.5 + gx as f32 * 7.0, -9.5 + gy as f32 * 7.0, 5.0, 5.0);
+                    cv.fill_round(sq, 1.2 * s, argb(alpha, rgb));
                 }
             }
         }
         Button::Number => {
-            cv.stroke_ellipse((cx - 9.0, cy - 9.0, 18.0, 18.0), ink, w);
+            cv.stroke_ellipse(q(-9.0, -9.0, 18.0, 18.0), ink, w);
             cv.line(p(-1.5, -3.5), p(1.0, -5.5), ink, w);
             cv.line(p(1.0, -5.5), p(1.0, 5.0), ink, w);
         }
         Button::ColorSwatch => {
-            let rr = (cx - 9.0, cy - 9.0, 18.0, 18.0);
+            let rr = q(-9.0, -9.0, 18.0, 18.0);
             cv.fill_ellipse(rr, argb_from_colorref(current.colorref()));
-            cv.stroke_ellipse(rr, argb(0x99, 0xFFFFFF), 1.6);
+            cv.stroke_ellipse(rr, argb(0x99, 0xFFFFFF), 1.4);
         }
         Button::Undo => {
             cv.curve(&[p(-8.0, 0.0), p(-1.0, -2.0), p(6.0, 1.0), p(7.0, 6.0)], ink, w);
@@ -214,16 +218,16 @@ fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
         Button::Copy => {
             // Folha de trás (só a parte visível) e folha da frente.
             cv.polyline(&[p(-3.0, 3.0), p(-8.0, 3.0), p(-8.0, -8.0), p(3.0, -8.0), p(3.0, -3.0)], ink, w);
-            cv.stroke_round((cx - 3.0, cy - 3.0, 11.0, 11.0), 2.5, ink, w);
+            cv.stroke_round(q(-3.0, -3.0, 11.0, 11.0), 2.5 * s, ink, w);
         }
         Button::Save => {
-            cv.stroke_round((cx - 7.5, cy - 7.5, 15.0, 15.0), 3.0, ink, w);
-            cv.stroke_round((cx - 3.5, cy - 7.5, 7.0, 5.0), 1.5, ink, w - 0.4);
-            cv.stroke_round((cx - 4.5, cy + 1.0, 9.0, 6.5), 1.5, ink, w - 0.4);
+            cv.stroke_round(q(-7.5, -7.5, 15.0, 15.0), 3.0 * s, ink, w);
+            cv.stroke_round(q(-3.5, -7.5, 7.0, 5.0), 1.5 * s, ink, w * 0.85);
+            cv.stroke_round(q(-4.5, 1.0, 9.0, 6.5), 1.5 * s, ink, w * 0.85);
         }
         Button::Close => {
-            cv.line(p(-6.0, -6.0), p(6.0, 6.0), ink, w + 0.2);
-            cv.line(p(6.0, -6.0), p(-6.0, 6.0), ink, w + 0.2);
+            cv.line(p(-6.0, -6.0), p(6.0, 6.0), ink, w);
+            cv.line(p(6.0, -6.0), p(-6.0, 6.0), ink, w);
         }
     }
 }
