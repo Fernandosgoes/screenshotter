@@ -1,0 +1,3 @@
+target/
+*.json.bak
+settings.json
