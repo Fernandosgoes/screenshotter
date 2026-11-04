@@ -25,6 +25,7 @@ pub struct Capture {
 }
 
 impl Capture {
+    #[cfg(test)]
     pub fn empty(width: i32, height: i32) -> Self {
         Capture {
             origin: Point { x: 0, y: 0 },
