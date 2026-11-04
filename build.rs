@@ -30,5 +30,7 @@ fn main() {
     run("windres", &["-i", "app.rc", "-O", "coff", "-o", "app.o"]);
     run("ar", &["rcs", "libScreenshotter_res.a", "app.o"]);
     println!("cargo:rustc-link-search=native={}", out.display());
-    println!("cargo:rustc-link-lib=static=Screenshotter_res");
+    // whole-archive: o objeto de recurso não tem símbolos referenciados pelo código, então
+    // sem isso o linker descarta o ícone da biblioteca e o .exe fica sem ícone.
+    println!("cargo:rustc-link-lib=static:+whole-archive=Screenshotter_res");
 }
