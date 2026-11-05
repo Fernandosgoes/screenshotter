@@ -15,13 +15,14 @@ use windows::Win32::Graphics::Gdi::{
     FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, HDC, HFONT, HGDIOBJ, InvalidateRect,
     PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
+use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN};
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DestroyWindow, FindWindowW, GetSystemMetrics, IDC_ARROW,
     LoadCursorW, MB_ICONINFORMATION, MB_OK, MessageBoxW, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_SHOW,
-    SetForegroundWindow, ShowWindow, WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN,
+    SendMessageW, SetForegroundWindow, ShowWindow, WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WNDCLASSW, WS_CAPTION, WS_SYSMENU,
 };
 use windows::core::{PCWSTR, w};
@@ -33,13 +34,15 @@ const W: i32 = 400;
 const H: i32 = 520;
 
 // Cores (RGB), as mesmas do mockup: claro, com o índigo da barra de ferramentas.
-const BG: u32 = 0xF1F3F8;
-const CARD: u32 = 0xFFFFFF;
-const LINE: u32 = 0xDFE3EE;
-const FIELD: u32 = 0xF6F7FB;
-const INK: u32 = 0x1E2433;
-const MUTED: u32 = 0x667089;
-const ACCENT: u32 = 0x6366F1;
+const BG: u32 = 0x0D111B;
+const FOOT: u32 = 0x121827;
+const ACCENT_FG: u32 = 0x10131F;
+const CARD: u32 = 0x161C2B;
+const LINE: u32 = 0x273049;
+const FIELD: u32 = 0x1D2538;
+const INK: u32 = 0xE2E8F0;
+const MUTED: u32 = 0x8B95AD;
+const ACCENT: u32 = 0x818CF8;
 
 type R = (f32, f32, f32, f32); // x, y, largura, altura
 
@@ -47,7 +50,14 @@ const CARD_HOTKEY: R = (14.0, 14.0, 372.0, 76.0);
 const CARD_DRAW: R = (14.0, 102.0, 372.0, 214.0);
 const CARD_FILE: R = (14.0, 328.0, 372.0, 124.0);
 
-const SEG: R = (28.0, 50.0, 344.0, 32.0);
+const SEG: R = (28.0, 48.0, 344.0, 30.0);
+/// Largura de cada botão do atalho (proporcional ao texto); somam a largura de SEG.
+const SEG_W: [f32; 3] = [140.0, 92.0, 112.0];
+
+/// (x, largura) do botão i do atalho.
+fn seg_bounds(i: usize) -> (f32, f32) {
+    (SEG.0 + SEG_W[..i].iter().sum::<f32>(), SEG_W[i])
+}
 const SWATCH_Y: f32 = 169.0;
 const SWATCH_X0: f32 = 41.0;
 const SWATCH_STEP: f32 = 54.0;
@@ -99,8 +109,8 @@ fn inside(r: R, x: f32, y: f32) -> bool {
 /// O que há sob o ponto (em pixels lógicos).
 fn hit(x: f32, y: f32) -> Option<Hit> {
     if inside(SEG, x, y) {
-        let i = ((x - SEG.0) / (SEG.2 / 3.0)) as usize;
-        return Some(Hit::Seg(i.min(2)));
+        let i = (0..3).find(|&i| x < seg_bounds(i).0 + SEG_W[i]).unwrap_or(2);
+        return Some(Hit::Seg(i));
     }
     for i in 0..COLORS.len() {
         let cx = SWATCH_X0 + SWATCH_STEP * i as f32;
@@ -297,6 +307,8 @@ fn shapes(dc: HDC, st: &State, pw: f32, ph: f32) {
     let rgb = |c: u32| argb(0xFF, c);
     let Some(cv) = Canvas::from_hdc(dc) else { return };
     cv.fill_round((0.0, 0.0, pw, ph), 0.0, rgb(BG));
+    cv.fill_round((0.0, 458.0 * s, pw, ph - 458.0 * s), 0.0, rgb(FOOT));
+    cv.line((0.0, 458.0 * s), (pw, 458.0 * s), rgb(LINE), 1.0);
     for c in [CARD_HOTKEY, CARD_DRAW, CARD_FILE] {
         cv.fill_round(sc(c), 12.0 * s, rgb(CARD));
         cv.stroke_round(sc(c), 12.0 * s, rgb(LINE), 1.0);
@@ -304,8 +316,8 @@ fn shapes(dc: HDC, st: &State, pw: f32, ph: f32) {
     // Botões lado a lado do atalho.
     cv.fill_round(sc(SEG), 9.0 * s, rgb(FIELD));
     cv.stroke_round(sc(SEG), 9.0 * s, rgb(LINE), 1.0);
-    let sw = SEG.2 / 3.0;
-    let on = (SEG.0 + sw * st.hotkey as f32 + 3.0, SEG.1 + 3.0, sw - 6.0, SEG.3 - 6.0);
+    let (bx, bw) = seg_bounds(st.hotkey);
+    let on = (bx + 3.0, SEG.1 + 3.0, bw - 6.0, SEG.3 - 6.0);
     cv.fill_round(sc(on), 7.0 * s, rgb(ACCENT));
     // Bolinhas de cor.
     for (i, c) in COLORS.iter().enumerate() {
@@ -347,6 +359,8 @@ fn texts(dc: HDC, st: &State) {
     let s = st.scale;
     let reg = font(s, 13.0, 400);
     let bold = font(s, 13.0, 600);
+    let seg_reg = font(s, 12.0, 400);
+    let seg_bold = font(s, 12.0, 600);
     let pick = |f: HFONT| unsafe {
         SelectObject(dc, HGDIOBJ(f.0));
     };
@@ -357,11 +371,11 @@ fn texts(dc: HDC, st: &State) {
     txt(dc, s, "Atalho de captura", (28.0, 24.0, 300.0, 22.0), INK, DT_LEFT);
     txt(dc, s, "Desenho", (28.0, 112.0, 300.0, 22.0), INK, DT_LEFT);
     txt(dc, s, "Arquivo", (28.0, 338.0, 300.0, 22.0), INK, DT_LEFT);
-    let sw = SEG.2 / 3.0;
     for (i, (_, name)) in HOTKEYS.iter().enumerate() {
         let on = i == st.hotkey;
-        pick(if on { bold } else { reg });
-        txt(dc, s, name, (SEG.0 + sw * i as f32, SEG.1, sw, SEG.3), if on { 0xFFFFFF } else { INK }, DT_CENTER);
+        pick(if on { seg_bold } else { seg_reg });
+        let (bx, bw) = seg_bounds(i);
+        txt(dc, s, name, (bx, SEG.1, bw, SEG.3), if on { ACCENT_FG } else { INK }, DT_CENTER);
     }
     pick(reg);
     txt(dc, s, "Cor padrão", (28.0, 134.0, 200.0, 20.0), MUTED, DT_LEFT);
@@ -377,11 +391,13 @@ fn texts(dc: HDC, st: &State) {
     txt(dc, s, "Iniciar com o Windows", (TOGGLE_ROW.0, TOGGLE_ROW.1, 250.0, TOGGLE_ROW.3), INK, DT_LEFT);
     pick(bold);
     txt(dc, s, "Cancelar", BTN_CANCEL, INK, DT_CENTER);
-    txt(dc, s, "Salvar", BTN_SAVE, 0xFFFFFF, DT_CENTER);
+    txt(dc, s, "Salvar", BTN_SAVE, ACCENT_FG, DT_CENTER);
     unsafe {
         SelectObject(dc, old);
         let _ = DeleteObject(HGDIOBJ(reg.0));
         let _ = DeleteObject(HGDIOBJ(bold.0));
+        let _ = DeleteObject(HGDIOBJ(seg_reg.0));
+        let _ = DeleteObject(HGDIOBJ(seg_bold.0));
     }
 }
 
@@ -500,6 +516,12 @@ pub fn open(main: HWND) {
         ) else {
             return;
         };
+        if let Ok(icon) = crate::tray::load_tray_icon() {
+            // WM_SETICON (0x80), ICON_SMALL = 0: ícone do app na barra de título.
+            let _ = SendMessageW(hwnd, 0x80, Some(WPARAM(0)), Some(LPARAM(icon.0 as isize)));
+        }
+        let dark: i32 = 1;
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark as *const i32 as *const _, 4);
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
     }

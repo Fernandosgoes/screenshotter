@@ -40,7 +40,7 @@ pub fn add(hwnd: HWND) -> windows::core::Result<()> {
 
 /// Ícone embutido no .exe pelo build.rs (recurso de ID 1), no tamanho pequeno do sistema
 /// (16 px em 100% de escala, maior em telas de alta densidade). Fallback: ícone padrão.
-fn load_tray_icon() -> windows::core::Result<HICON> {
+pub(crate) fn load_tray_icon() -> windows::core::Result<HICON> {
     unsafe {
         let hinst = GetModuleHandleW(None).unwrap_or_default();
         let (cx, cy) = (GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));

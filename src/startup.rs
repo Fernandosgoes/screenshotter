@@ -6,13 +6,21 @@ use std::process::Command;
 const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 const NAME: &str = "Screenshotter";
 
-/// Verdadeiro se o valor de inicialização automática existe.
+/// Verdadeiro se o valor de inicialização automática existe. Lê o registro direto
+/// (rápido); chamar o reg.exe aqui atrasava a abertura das configurações.
 pub fn is_enabled() -> bool {
-    Command::new("reg")
-        .args(["query", KEY, "/v", NAME])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    use windows::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryValueExW};
+    use windows::core::{HSTRING, w};
+    unsafe {
+        let mut key = HKEY::default();
+        let sub = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+        if RegOpenKeyExW(HKEY_CURRENT_USER, sub, None, KEY_READ, &mut key).is_err() {
+            return false;
+        }
+        let found = RegQueryValueExW(key, &HSTRING::from(NAME), None, None, None, None).is_ok();
+        let _ = RegCloseKey(key);
+        found
+    }
 }
 
 pub fn set_enabled(on: bool) -> std::io::Result<()> {
