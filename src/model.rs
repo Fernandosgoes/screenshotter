@@ -1,9 +1,8 @@
+//! Modelo de anotações: lista de objetos editáveis com desfazer/refazer.
+//! Puro (sem Win32). Cada gesto do usuário vira um passo de desfazer.
 // Seleção e movimento de objetos ficam no modelo (com testes), mas o editor não os usa:
 // formas desenhadas não podem ser movidas, para permitir desenhar por cima delas.
 #![allow(dead_code)]
-
-﻿//! Modelo de anotações: lista de objetos editáveis com desfazer/refazer.
-//! Puro (sem Win32). Cada gesto do usuário vira um passo de desfazer.
 
 use crate::config::Color;
 use crate::geom::{Point, Rect};
