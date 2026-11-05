@@ -403,6 +403,12 @@ impl Editor {
     pub fn delete_selected(&mut self) {
         self.doc.delete_selected();
     }
+
+    /// Borracha: apaga todos os desenhos, mantendo a seleção. Desfazível com Ctrl+Z.
+    pub fn clear_all(&mut self) {
+        self.commit_text();
+        self.doc.clear_all();
+    }
 }
 
 fn recolor(doc: &mut Document, i: usize, c: Color) {
@@ -592,6 +598,25 @@ mod tests {
         assert_eq!(e.color, Color::Green);
         e.set_tool(Tool::Pen);
         assert_eq!(e.palette_colors().len(), 6);
+    }
+
+    #[test]
+    fn clear_all_removes_everything_and_keeps_selection_and_undoes() {
+        let mut e = Editor::test_new(800, 600);
+        e.sel = Some(Rect { x: 0, y: 0, w: 800, h: 600 });
+        e.set_tool(Tool::Rect);
+        e.on_mouse_down(Point { x: 100, y: 100 });
+        e.on_mouse_move(Point { x: 200, y: 200 }, false);
+        e.on_mouse_up();
+        e.set_tool(Tool::Number);
+        e.on_mouse_down(Point { x: 300, y: 300 });
+        e.on_mouse_up();
+        assert_eq!(e.doc.items().len(), 2);
+        e.clear_all();
+        assert!(e.doc.items().is_empty());
+        assert!(e.sel.is_some(), "a seleção continua");
+        e.undo();
+        assert_eq!(e.doc.items().len(), 2, "Ctrl+Z desfaz o clear all");
     }
 
     #[test]

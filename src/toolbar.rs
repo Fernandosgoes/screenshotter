@@ -37,12 +37,14 @@ pub enum Button {
     Number,
     ColorSwatch,
     Undo,
+    /// Borracha: apaga todas as anotações (ação, não ferramenta).
+    ClearAll,
     Copy,
     Save,
     Close,
 }
 
-pub const VERTICAL: [Button; 12] = [
+pub const VERTICAL: [Button; 13] = [
     Button::Move,
     Button::Pen,
     Button::Line,
@@ -55,6 +57,7 @@ pub const VERTICAL: [Button; 12] = [
     Button::Number,
     Button::ColorSwatch,
     Button::Undo,
+    Button::ClearAll,
 ];
 
 pub const HORIZONTAL: [Button; 3] = [Button::Copy, Button::Save, Button::Close];
@@ -238,6 +241,12 @@ fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
             cv.curve(&[p(-8.0, 0.0), p(-1.0, -2.0), p(6.0, 1.0), p(7.0, 6.0)], ink, w);
             cv.line(p(-8.0, 0.0), p(-3.0, -5.0), ink, w);
             cv.line(p(-8.0, 0.0), p(-3.0, 5.0), ink, w);
+        }
+        Button::ClearAll => {
+            // Borracha: corpo arredondado com divisória e um traço de "apagar" embaixo.
+            cv.stroke_round(q(-8.0, -7.0, 16.0, 10.0), 3.0 * s, ink, w);
+            cv.line(p(0.0, -7.0), p(0.0, 3.0), ink, w);
+            cv.line(p(-6.0, 8.0), p(8.0, 8.0), ink, w);
         }
         Button::Copy => {
             // Folha de trás (só a parte visível) e folha da frente.

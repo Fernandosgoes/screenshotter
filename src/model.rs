@@ -181,6 +181,17 @@ impl Document {
         self.selected
     }
 
+    /// Apaga todas as anotações de uma vez (um único passo de desfazer).
+    pub fn clear_all(&mut self) -> bool {
+        if self.items.is_empty() {
+            return false;
+        }
+        self.checkpoint();
+        self.items.clear();
+        self.selected = None;
+        true
+    }
+
     pub fn clear_selection(&mut self) {
         self.selected = None;
     }

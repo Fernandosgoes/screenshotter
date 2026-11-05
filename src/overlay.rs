@@ -320,6 +320,7 @@ fn on_mouse_down(p: Point) {
                     Button::Number => { e.set_tool(Tool::Number); None }
                     Button::ColorSwatch => { e.toggle_palette(); None }
                     Button::Undo => { e.undo(); None }
+                    Button::ClearAll => { e.clear_all(); None }
                     Button::Copy => Some(Cmd::Copy),
                     Button::Save => Some(Cmd::Save),
                     Button::Close => Some(Cmd::Close),
