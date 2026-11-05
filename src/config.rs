@@ -7,6 +7,16 @@ pub enum HotkeyChoice {
     ShiftBackspace,
     PrtScn,
     ShiftPrtScn,
+    /// Combinação escolhida pelo usuário (ver `Settings::custom_hotkey`).
+    Custom,
+}
+
+/// Atalho personalizado: `mods` usa os bits de MOD_ALT (1), MOD_CONTROL (2) e MOD_SHIFT (4);
+/// `vk` é a tecla virtual do Windows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hotkey {
+    pub mods: u32,
+    pub vk: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +56,8 @@ impl Color {
 #[serde(default)]
 pub struct Settings {
     pub hotkey: HotkeyChoice,
+    /// Usado quando `hotkey` é `Custom`.
+    pub custom_hotkey: Option<Hotkey>,
     pub start_with_windows: bool,
     pub stroke_width: u32,
     pub text_size: u32,
@@ -58,6 +70,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             hotkey: HotkeyChoice::ShiftBackspace,
+            custom_hotkey: None,
             start_with_windows: false,
             stroke_width: 3,
             text_size: 18,
@@ -105,6 +118,20 @@ mod tests {
         let p = dir.join("settings.json");
         std::fs::write(&p, r#"{ "stroke_width": 5, "text_background": true }"#).unwrap();
         assert_eq!(Settings::load(&p).stroke_width, 5);
+    }
+
+    #[test]
+    fn custom_hotkey_round_trips() {
+        let dir = std::env::temp_dir().join("shot_cfg_hk");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("settings.json");
+        let s = Settings {
+            hotkey: HotkeyChoice::Custom,
+            custom_hotkey: Some(Hotkey { mods: 2 | 4, vk: 0x53 }),
+            ..Settings::default()
+        };
+        s.save(&p).unwrap();
+        assert_eq!(Settings::load(&p), s);
     }
 
     #[test]

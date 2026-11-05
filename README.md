@@ -74,7 +74,7 @@ Depois de copiar ou salvar, a captura fecha.
 
 Clique com o botão direito no ícone da bandeja → **Configurações**. Lá você pode:
 
-- trocar o atalho de captura (Shift + Backspace, Print Screen ou Shift + Print Screen);
+- trocar o atalho de captura: Shift + Backspace, Print Screen, Shift + Print Screen ou **Personalizado**. Em Personalizado, clique no campo **Tecla personalizada** e pressione a combinação desejada (ex.: Ctrl + Alt + S). A combinação precisa ter Ctrl, Alt ou Shift, ou ser uma tecla F;
 - ativar ou desativar a abertura com o Windows;
 - ajustar a espessura padrão do traço, o tamanho padrão do texto e a cor padrão.
 

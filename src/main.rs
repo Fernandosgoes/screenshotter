@@ -197,7 +197,7 @@ fn main() {
         }
         let _ = tray::add(hwnd);
 
-        let (_chosen, warn) = hotkey::register(hwnd, settings.hotkey);
+        let (_chosen, warn) = hotkey::register(hwnd, &settings);
         if let Some(w) = warn {
             message(w);
         }

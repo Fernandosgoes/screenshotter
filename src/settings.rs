@@ -3,8 +3,9 @@
 //! JPEG não é exposta aqui: fica no valor do settings.json (padrão 80). Salvar grava settings.json,
 //! registra o novo atalho na hora e ajusta a inicialização automática.
 
-use crate::config::{Color, HotkeyChoice, Settings};
+use crate::config::{Color, Hotkey, HotkeyChoice, Settings};
 use crate::{hotkey, startup};
+use windows::Win32::UI::Controls::{ICC_HOTKEY_CLASS, INITCOMMONCONTROLSEX, InitCommonControlsEx};
 use crate::gfx::{Canvas, argb_from_colorref};
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -13,7 +14,7 @@ use windows::Win32::Graphics::Gdi::{
     DrawTextW, EndPaint, FillRect, HBRUSH, HGDIOBJ, InvalidateRect, PAINTSTRUCT, SelectObject,
     SetBkMode, SetTextColor, TRANSPARENT,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, ReleaseCapture, SetCapture};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -30,8 +31,19 @@ const CLASS: PCWSTR = w!("ScreenshotterSettings");
 const ID_HOTKEY: i32 = 101;
 const ID_COLOR: i32 = 102;
 const ID_STARTUP: i32 = 106;
+const ID_CUSTOM: i32 = 107;
 const ID_SAVE: i32 = 1; // IDOK: Enter aciona
 const ID_CANCEL: i32 = 2; // IDCANCEL: Esc aciona
+
+/// Índice do "Personalizado" no combo de atalhos (último item de HOTKEYS).
+const CUSTOM_INDEX: usize = 3;
+// Campo de captura de tecla (classe nativa do Windows, msctls_hotkey32).
+const WM_SETHOTKEY: u32 = 0x0032;
+const WM_GETHOTKEY: u32 = 0x0033;
+// Bits de modificador do campo de tecla (HOTKEYF_*), diferentes dos MOD_* do RegisterHotKey.
+const HKF_SHIFT: usize = 0x01;
+const HKF_CONTROL: usize = 0x02;
+const HKF_ALT: usize = 0x04;
 
 // Estilos de controles (valores do SDK).
 const BS_PUSHBUTTON: u32 = 0;
@@ -72,11 +84,70 @@ static OPEN: AtomicIsize = AtomicIsize::new(0);
 /// Escala de DPI (bits de f32), para desenhar as prévias.
 static SCALE: AtomicU32 = AtomicU32::new(0x3F80_0000);
 
-const HOTKEYS: [(HotkeyChoice, &str); 3] = [
+const HOTKEYS: [(HotkeyChoice, &str); 4] = [
     (HotkeyChoice::ShiftBackspace, "Shift + Backspace"),
     (HotkeyChoice::PrtScn, "PrtScn"),
     (HotkeyChoice::ShiftPrtScn, "Shift + PrtScn"),
+    (HotkeyChoice::Custom, "Personalizado"),
 ];
+
+/// Formato do campo de tecla: byte baixo = tecla virtual, byte alto = modificadores HOTKEYF_*.
+fn to_control(h: Hotkey) -> usize {
+    let mut f = 0;
+    if h.mods & 4 != 0 {
+        f |= HKF_SHIFT;
+    }
+    if h.mods & 2 != 0 {
+        f |= HKF_CONTROL;
+    }
+    if h.mods & 1 != 0 {
+        f |= HKF_ALT;
+    }
+    (h.vk as usize & 0xFF) | (f << 8)
+}
+
+fn from_control(v: usize) -> Hotkey {
+    let f = (v >> 8) & 0xFF;
+    let mut mods = 0;
+    if f & HKF_SHIFT != 0 {
+        mods |= 4;
+    }
+    if f & HKF_CONTROL != 0 {
+        mods |= 2;
+    }
+    if f & HKF_ALT != 0 {
+        mods |= 1;
+    }
+    Hotkey { mods, vk: (v & 0xFF) as u32 }
+}
+
+/// Aceita só combinações que o Windows aceita como atalho global e que não viram
+/// digitação normal: precisa de Ctrl, Alt ou Shift (ou ser uma tecla F), e não pode ser
+/// só um modificador.
+fn valid_custom(h: Hotkey) -> Result<(), &'static str> {
+    let modifier_only = matches!(h.vk, 0x10..=0x12 | 0x5B | 0x5C | 0xA0..=0xA5);
+    if h.vk == 0 {
+        return Err("Escolha a tecla no campo \"Tecla personalizada\".");
+    }
+    if modifier_only {
+        return Err("Escolha uma tecla que não seja só Ctrl, Alt ou Shift.");
+    }
+    let f_key = (0x70..=0x87).contains(&h.vk);
+    if h.mods == 0 && !f_key {
+        return Err("Use Ctrl, Alt ou Shift junto com a tecla (ou uma tecla F).");
+    }
+    Ok(())
+}
+
+/// Liga o campo de tecla só quando "Personalizado" está escolhido no combo.
+fn sync_custom(hwnd: HWND) {
+    unsafe {
+        let hk = GetDlgItem(Some(hwnd), ID_HOTKEY).unwrap_or_default();
+        let custom = GetDlgItem(Some(hwnd), ID_CUSTOM).unwrap_or_default();
+        let sel = send(hk, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0;
+        let _ = EnableWindow(custom, sel == CUSTOM_INDEX as isize);
+    }
+}
 
 const COLORS: [(Color, &str); 6] = [
     (Color::Yellow, "Amarelo"),
@@ -177,6 +248,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
         WM_COMMAND => {
             if (wp.0 & 0xFFFF) as i32 == ID_COLOR && (wp.0 >> 16) & 0xFFFF == CBN_SELCHANGE {
                 refresh_rows(hwnd);
+            }
+            if (wp.0 & 0xFFFF) as i32 == ID_HOTKEY && (wp.0 >> 16) & 0xFFFF == CBN_SELCHANGE {
+                sync_custom(hwnd);
             }
             match (wp.0 & 0xFFFF) as i32 {
                 ID_SAVE => {
@@ -336,6 +410,14 @@ fn save(hwnd: HWND) {
         if let Some((c, _)) = HOTKEYS.get(hk as usize) {
             s.hotkey = *c;
         }
+        if s.hotkey == HotkeyChoice::Custom {
+            let h = from_control(send(item(ID_CUSTOM), WM_GETHOTKEY, WPARAM(0), LPARAM(0)).0 as usize);
+            if let Err(msg) = valid_custom(h) {
+                info(hwnd, msg);
+                return;
+            }
+            s.custom_hotkey = Some(h);
+        }
         let co = send(item(ID_COLOR), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0;
         if let Some((c, _)) = COLORS.get(co as usize) {
             s.default_color = *c;
@@ -354,7 +436,7 @@ fn save(hwnd: HWND) {
         let _ = startup::set_enabled(want);
     });
     let main = HWND(MAIN.load(Ordering::Relaxed) as *mut _);
-    let (_, warn) = hotkey::register(main, s.hotkey);
+    let (_, warn) = hotkey::register(main, &s);
     if let Some(w) = warn {
         info(hwnd, w);
     }
@@ -396,6 +478,13 @@ pub fn open(main: HWND) {
         };
         RegisterClassW(&wc);
 
+        // Registra a classe do campo de tecla (msctls_hotkey32).
+        let icc = INITCOMMONCONTROLSEX {
+            dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+            dwICC: ICC_HOTKEY_CLASS,
+        };
+        let _ = InitCommonControlsEx(&icc);
+
         let s = (GetDpiForSystem() as f32 / 96.0).max(1.0);
         SCALE.store(s.to_bits(), Ordering::Relaxed);
         VALS[0].store(cur.stroke_width.clamp(STROKE_RANGE.0, STROKE_RANGE.1), Ordering::Relaxed);
@@ -403,7 +492,7 @@ pub fn open(main: HWND) {
         DRAG.store(9, Ordering::Relaxed);
         let sc = |v: i32| (v as f32 * s).round() as i32;
         let style = WS_CAPTION | WS_SYSMENU;
-        let mut r = RECT { left: 0, top: 0, right: sc(400), bottom: sc(240) };
+        let mut r = RECT { left: 0, top: 0, right: sc(400), bottom: sc(272) };
         let _ = AdjustWindowRectEx(&mut r, style, false, WINDOW_EX_STYLE(0));
         let (ww, wh) = (r.right - r.left, r.bottom - r.top);
         // Centralizada na área de trabalho (acima da barra de tarefas), como no Lightshot.
@@ -479,11 +568,18 @@ pub fn open(main: HWND) {
         label("Espessura do traço", 80);
         label("Tamanho do texto", 132);
 
-        let cb = child(hwnd, w!("BUTTON"), "Iniciar com o Windows", BS_AUTOCHECKBOX | tab, 0, ID_STARTUP, (12, 180, 376, 20), s, f);
+        label("Tecla personalizada", 180);
+        let custom = child(hwnd, w!("msctls_hotkey32"), "", tab, 0, ID_CUSTOM, (170, 177, 218, 22), s, f);
+        if let Some(h) = cur.custom_hotkey {
+            send(custom, WM_SETHOTKEY, WPARAM(to_control(h)), LPARAM(0));
+        }
+        sync_custom(hwnd);
+
+        let cb = child(hwnd, w!("BUTTON"), "Iniciar com o Windows", BS_AUTOCHECKBOX | tab, 0, ID_STARTUP, (12, 206, 376, 20), s, f);
         send(cb, BM_SETCHECK, WPARAM(cur.start_with_windows as usize), LPARAM(0));
 
-        child(hwnd, w!("BUTTON"), "Salvar", BS_DEFPUSHBUTTON | tab, 0, ID_SAVE, (232, 208, 76, 26), s, f);
-        child(hwnd, w!("BUTTON"), "Cancelar", BS_PUSHBUTTON | tab, 0, ID_CANCEL, (312, 208, 76, 26), s, f);
+        child(hwnd, w!("BUTTON"), "Salvar", BS_DEFPUSHBUTTON | tab, 0, ID_SAVE, (232, 236, 76, 26), s, f);
+        child(hwnd, w!("BUTTON"), "Cancelar", BS_PUSHBUTTON | tab, 0, ID_CANCEL, (312, 236, 76, 26), s, f);
 
         if let Ok(icon) = crate::tray::load_tray_icon() {
             send(hwnd, 0x80, WPARAM(0), LPARAM(icon.0 as isize)); // WM_SETICON, ICON_SMALL
