@@ -1,4 +1,4 @@
-﻿//! Janela de configurações (aberta pelo menu da bandeja): atalho, cor, espessura e tamanho
+//! Janela de configurações (aberta pelo menu da bandeja): atalho, cor, espessura e tamanho
 //! do texto (barras deslizantes com prévia ao lado) e "iniciar com o Windows". A qualidade
 //! JPEG não é exposta aqui: fica no valor do settings.json (padrão 80). Salvar grava settings.json,
 //! registra o novo atalho na hora e ajusta a inicialização automática.
@@ -9,11 +9,11 @@ use crate::gfx::{Canvas, argb_from_colorref};
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-    DrawTextW, EndPaint, FillRect, FrameRect, HBRUSH, HGDIOBJ, InvalidateRect, PAINTSTRUCT, SelectObject,
+    BeginPaint, CreateFontW, DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject,
+    DrawTextW, EndPaint, FillRect, HBRUSH, HGDIOBJ, InvalidateRect, PAINTSTRUCT, SelectObject,
     SetBkMode, SetTextColor, TRANSPARENT,
 };
-use windows::Win32::UI::Controls::{ICC_BAR_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx};
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForSystem;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -29,8 +29,6 @@ const CLASS: PCWSTR = w!("ScreenshotterSettings");
 
 const ID_HOTKEY: i32 = 101;
 const ID_COLOR: i32 = 102;
-const ID_STROKE: i32 = 103;
-const ID_TEXT: i32 = 104;
 const ID_STARTUP: i32 = 106;
 const ID_SAVE: i32 = 1; // IDOK: Enter aciona
 const ID_CANCEL: i32 = 2; // IDCANCEL: Esc aciona
@@ -40,24 +38,32 @@ const BS_PUSHBUTTON: u32 = 0;
 const BS_DEFPUSHBUTTON: u32 = 1;
 const BS_AUTOCHECKBOX: u32 = 3;
 const CBS_DROPDOWNLIST: u32 = 3;
-const TBS_NOTICKS: u32 = 0x10;
-const TBM_GETPOS: u32 = 0x0400;
-const TBM_SETPOS: u32 = 0x0405;
-const TBM_SETRANGE: u32 = 0x0406;
-const WM_HSCROLL: u32 = 0x0114;
-const CBN_SELCHANGE: usize = 1;
-
-// Faixas das barras (espessura do traço e tamanho do texto, em pixels).
-const STROKE_RANGE: (u32, u32) = (1, 20);
-const TEXT_RANGE: (u32, u32) = (10, 36);
-// Caixas de prévia (x, y, largura, altura), em pixels lógicos.
-const PREVIEW_STROKE: (i32, i32, i32, i32) = (300, 62, 88, 46);
-const PREVIEW_TEXT: (i32, i32, i32, i32) = (300, 114, 88, 46);
 const CB_ADDSTRING: u32 = 0x0143;
 const CB_GETCURSEL: u32 = 0x0147;
 const CB_SETCURSEL: u32 = 0x014E;
 const BM_GETCHECK: u32 = 0x00F0;
 const BM_SETCHECK: u32 = 0x00F1;
+const CBN_SELCHANGE: usize = 1;
+const WM_LBUTTONDOWN: u32 = 0x0201;
+const WM_LBUTTONUP: u32 = 0x0202;
+const WM_MOUSEMOVE: u32 = 0x0200;
+
+// Faixas das barras (espessura do traço e tamanho do texto, em pixels).
+const STROKE_RANGE: (u32, u32) = (1, 20);
+const TEXT_RANGE: (u32, u32) = (10, 36);
+/// Barras desenhadas à mão: (centro y, x inicial, x final) em pixels lógicos.
+const TRACK_X0: f32 = 176.0;
+const TRACK_X1: f32 = 280.0;
+const TRACK_Y: [f32; 2] = [90.0, 142.0];
+/// Caixas de prévia (x, y, largura, altura), alinhadas à borda direita das listas.
+const PREVIEW: [(i32, i32, i32, i32); 2] = [(298, 68, 90, 44), (298, 120, 90, 44)];
+
+/// Valores atuais das barras: espessura e tamanho do texto.
+static VALS: [AtomicU32; 2] = [AtomicU32::new(3), AtomicU32::new(18)];
+/// Barra sendo arrastada (0, 1) ou 9 se nenhuma.
+static DRAG: AtomicU32 = AtomicU32::new(9);
+
+const RANGES: [(u32, u32); 2] = [STROKE_RANGE, TEXT_RANGE];
 
 /// Janela principal (dona do atalho global): precisa ser reregistrada ao salvar.
 static MAIN: AtomicIsize = AtomicIsize::new(0);
@@ -139,13 +145,38 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> 
             paint_previews(hwnd);
             LRESULT(0)
         }
-        WM_HSCROLL => {
-            refresh_previews(hwnd);
+        WM_LBUTTONDOWN => {
+            let (x, y) = mouse_xy(lp);
+            if let Some(i) = (0..2).find(|&i| {
+                x >= TRACK_X0 - 10.0 && x <= TRACK_X1 + 10.0 && (y - TRACK_Y[i]).abs() <= 12.0
+            }) {
+                DRAG.store(i as u32, Ordering::Relaxed);
+                unsafe {
+                    SetCapture(hwnd);
+                }
+                set_from_x(hwnd, i, x);
+            }
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            let d = DRAG.load(Ordering::Relaxed) as usize;
+            if d < 2 {
+                let (x, _) = mouse_xy(lp);
+                set_from_x(hwnd, d, x);
+            }
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            if DRAG.swap(9, Ordering::Relaxed) < 2 {
+                unsafe {
+                    let _ = ReleaseCapture();
+                }
+            }
             LRESULT(0)
         }
         WM_COMMAND => {
             if (wp.0 & 0xFFFF) as i32 == ID_COLOR && (wp.0 >> 16) & 0xFFFF == CBN_SELCHANGE {
-                refresh_previews(hwnd);
+                refresh_rows(hwnd);
             }
             match (wp.0 & 0xFFFF) as i32 {
                 ID_SAVE => {
@@ -179,10 +210,28 @@ fn scale() -> f32 {
     f32::from_bits(SCALE.load(Ordering::Relaxed))
 }
 
-/// Valor atual de uma barra deslizante.
-fn slider(hwnd: HWND, id: i32, (lo, hi): (u32, u32)) -> u32 {
-    let c = unsafe { GetDlgItem(Some(hwnd), id).unwrap_or_default() };
-    (send(c, TBM_GETPOS, WPARAM(0), LPARAM(0)).0 as u32).clamp(lo, hi)
+fn mouse_xy(lp: LPARAM) -> (f32, f32) {
+    let s = scale();
+    let x = (lp.0 & 0xFFFF) as i16 as f32;
+    let y = ((lp.0 >> 16) & 0xFFFF) as i16 as f32;
+    (x / s, y / s)
+}
+
+/// Valor da barra `i` para a posição x (limitado à faixa).
+fn value_at(x: f32, (lo, hi): (u32, u32)) -> u32 {
+    let f = ((x - TRACK_X0) / (TRACK_X1 - TRACK_X0)).clamp(0.0, 1.0);
+    lo + (f * (hi - lo) as f32).round() as u32
+}
+
+fn set_from_x(hwnd: HWND, i: usize, x: f32) {
+    let v = value_at(x, RANGES[i]);
+    if VALS[i].swap(v, Ordering::Relaxed) != v {
+        refresh_rows(hwnd);
+    }
+}
+
+fn slider(i: usize) -> u32 {
+    VALS[i].load(Ordering::Relaxed).clamp(RANGES[i].0, RANGES[i].1)
 }
 
 fn current_color(hwnd: HWND) -> Color {
@@ -196,48 +245,63 @@ fn px_rect(r: (i32, i32, i32, i32), s: f32) -> RECT {
     RECT { left: sc(r.0), top: sc(r.1), right: sc(r.0 + r.2), bottom: sc(r.1 + r.3) }
 }
 
-/// Manda redesenhar só as duas caixas de prévia.
-fn refresh_previews(hwnd: HWND) {
-    let s = scale();
+/// Faixa horizontal das duas linhas de barras + prévias (lado direito da janela).
+fn rows_rect(s: f32) -> RECT {
+    px_rect((166, 62, 230, 108), s)
+}
+
+fn refresh_rows(hwnd: HWND) {
+    let rc = rows_rect(scale());
     unsafe {
-        for r in [PREVIEW_STROKE, PREVIEW_TEXT] {
-            let rc = px_rect(r, s);
-            let _ = InvalidateRect(Some(hwnd), Some(&rc), true);
-        }
+        let _ = InvalidateRect(Some(hwnd), Some(&rc), false);
     }
 }
 
-/// Prévias: um ponto com a espessura do traço e "ABC" com o tamanho do texto, na cor escolhida.
+/// Barras deslizantes (como um controle de volume) e prévias: um ponto com a espessura
+/// do traço e "ABC" com o tamanho do texto, na cor escolhida.
 fn paint_previews(hwnd: HWND) {
     let s = scale();
     let color = current_color(hwnd);
-    let stroke = slider(hwnd, ID_STROKE, STROKE_RANGE);
-    let text = slider(hwnd, ID_TEXT, TEXT_RANGE);
     unsafe {
         let mut ps = PAINTSTRUCT::default();
         let hdc = BeginPaint(hwnd, &mut ps);
-        let bg = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00D8_D8D8));
-        let frame = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x0080_8080));
-        for r in [PREVIEW_STROKE, PREVIEW_TEXT] {
-            let rc = px_rect(r, s);
-            FillRect(hdc, &rc, bg);
-            FrameRect(hdc, &rc, frame);
-        }
-        let _ = DeleteObject(HGDIOBJ(bg.0));
-        let _ = DeleteObject(HGDIOBJ(frame.0));
-
-        // Ponto: diâmetro = espessura do traço.
-        let rc = px_rect(PREVIEW_STROKE, s);
-        let (cx, cy) = ((rc.left + rc.right) as f32 / 2.0, (rc.top + rc.bottom) as f32 / 2.0);
-        let d = stroke as f32 * s;
+        // Faixa das barras: fundo cinza do Windows antes de redesenhar.
+        let area = rows_rect(s);
+        FillRect(hdc, &area, HBRUSH(16 as *mut _)); // COLOR_BTNFACE + 1
+        let argb = |rgb: u32| 0xFF00_0000 | rgb;
         if let Some(cv) = Canvas::from_hdc(hdc) {
-            cv.fill_ellipse((cx - d / 2.0, cy - d / 2.0, d, d), argb_from_colorref(color.colorref()));
+            for i in 0..2 {
+                let (lo, hi) = RANGES[i];
+                let f = (slider(i) - lo) as f32 / (hi - lo) as f32;
+                let cy = TRACK_Y[i];
+                let len = TRACK_X1 - TRACK_X0;
+                let sc = |r: (f32, f32, f32, f32)| (r.0 * s, r.1 * s, r.2 * s, r.3 * s);
+                cv.fill_round(sc((TRACK_X0, cy - 2.0, len, 4.0)), 2.0 * s, argb(0xBBBBC2));
+                if f > 0.0 {
+                    cv.fill_round(sc((TRACK_X0, cy - 2.0, len * f, 4.0)), 2.0 * s, argb(0x6366F1));
+                }
+                let kx = TRACK_X0 + len * f;
+                cv.fill_ellipse(sc((kx - 8.0, cy - 8.0, 16.0, 16.0)), argb(0x6366F1));
+                cv.fill_ellipse(sc((kx - 3.0, cy - 3.0, 6.0, 6.0)), argb(0xFFFFFF));
+                // Caixa de prévia branca de cantos arredondados.
+                let pr = PREVIEW[i];
+                let b = sc((pr.0 as f32, pr.1 as f32, pr.2 as f32, pr.3 as f32));
+                cv.fill_round(b, 6.0 * s, argb(0xFFFFFF));
+                cv.stroke_round(b, 6.0 * s, argb(0xC4C4CC), 1.0);
+            }
+            // Ponto: diâmetro = espessura do traço (contorno fino para o branco aparecer).
+            let pr = PREVIEW[0];
+            let (cx, cy) = ((pr.0 as f32 + pr.2 as f32 / 2.0) * s, (pr.1 as f32 + pr.3 as f32 / 2.0) * s);
+            let d = slider(0) as f32 * s;
+            let e = (cx - d / 2.0, cy - d / 2.0, d, d);
+            cv.fill_ellipse(e, argb_from_colorref(color.colorref()));
+            cv.stroke_ellipse(e, argb(0xB0B0B8), 1.0);
         }
 
         // Texto: "ABC" na altura configurada.
-        let mut rc = px_rect(PREVIEW_TEXT, s);
+        let mut rc = px_rect(PREVIEW[1], s);
         let font = CreateFontW(
-            -(text as f32 * s).round() as i32,
+            -(slider(1) as f32 * s).round() as i32,
             0,
             0,
             0,
@@ -278,8 +342,8 @@ fn save(hwnd: HWND) {
         }
         s.start_with_windows = send(item(ID_STARTUP), BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
     }
-    s.stroke_width = slider(hwnd, ID_STROKE, STROKE_RANGE);
-    s.text_size = slider(hwnd, ID_TEXT, TEXT_RANGE);
+    s.stroke_width = slider(0);
+    s.text_size = slider(1);
 
     if s.save(&path).is_err() {
         info(hwnd, "Não foi possível gravar as configurações.");
@@ -334,13 +398,12 @@ pub fn open(main: HWND) {
 
         let s = (GetDpiForSystem() as f32 / 96.0).max(1.0);
         SCALE.store(s.to_bits(), Ordering::Relaxed);
-        let _ = InitCommonControlsEx(&INITCOMMONCONTROLSEX {
-            dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
-            dwICC: ICC_BAR_CLASSES,
-        });
+        VALS[0].store(cur.stroke_width.clamp(STROKE_RANGE.0, STROKE_RANGE.1), Ordering::Relaxed);
+        VALS[1].store(cur.text_size.clamp(TEXT_RANGE.0, TEXT_RANGE.1), Ordering::Relaxed);
+        DRAG.store(9, Ordering::Relaxed);
         let sc = |v: i32| (v as f32 * s).round() as i32;
         let style = WS_CAPTION | WS_SYSMENU;
-        let mut r = RECT { left: 0, top: 0, right: sc(400), bottom: sc(236) };
+        let mut r = RECT { left: 0, top: 0, right: sc(400), bottom: sc(240) };
         let _ = AdjustWindowRectEx(&mut r, style, false, WINDOW_EX_STYLE(0));
         let (ww, wh) = (r.right - r.left, r.bottom - r.top);
         // Centralizada na área de trabalho (acima da barra de tarefas), como no Lightshot.
@@ -413,20 +476,14 @@ pub fn open(main: HWND) {
         let idx = COLORS.iter().position(|(c, _)| *c == cur.default_color).unwrap_or(3);
         send(co, CB_SETCURSEL, WPARAM(idx), LPARAM(0));
 
-        label("Espessura do traço", 74);
-        let tb = child(hwnd, w!("msctls_trackbar32"), "", TBS_NOTICKS | tab, 0, ID_STROKE, (166, 68, 128, 30), s, f);
-        send(tb, TBM_SETRANGE, WPARAM(1), LPARAM(((STROKE_RANGE.1 << 16) | STROKE_RANGE.0) as isize));
-        send(tb, TBM_SETPOS, WPARAM(1), LPARAM(cur.stroke_width.clamp(STROKE_RANGE.0, STROKE_RANGE.1) as isize));
-        label("Tamanho do texto", 126);
-        let tb = child(hwnd, w!("msctls_trackbar32"), "", TBS_NOTICKS | tab, 0, ID_TEXT, (166, 120, 128, 30), s, f);
-        send(tb, TBM_SETRANGE, WPARAM(1), LPARAM(((TEXT_RANGE.1 << 16) | TEXT_RANGE.0) as isize));
-        send(tb, TBM_SETPOS, WPARAM(1), LPARAM(cur.text_size.clamp(TEXT_RANGE.0, TEXT_RANGE.1) as isize));
+        label("Espessura do traço", 80);
+        label("Tamanho do texto", 132);
 
-        let cb = child(hwnd, w!("BUTTON"), "Iniciar com o Windows", BS_AUTOCHECKBOX | tab, 0, ID_STARTUP, (12, 172, 376, 20), s, f);
+        let cb = child(hwnd, w!("BUTTON"), "Iniciar com o Windows", BS_AUTOCHECKBOX | tab, 0, ID_STARTUP, (12, 180, 376, 20), s, f);
         send(cb, BM_SETCHECK, WPARAM(cur.start_with_windows as usize), LPARAM(0));
 
-        child(hwnd, w!("BUTTON"), "Salvar", BS_DEFPUSHBUTTON | tab, 0, ID_SAVE, (232, 202, 76, 26), s, f);
-        child(hwnd, w!("BUTTON"), "Cancelar", BS_PUSHBUTTON | tab, 0, ID_CANCEL, (312, 202, 76, 26), s, f);
+        child(hwnd, w!("BUTTON"), "Salvar", BS_DEFPUSHBUTTON | tab, 0, ID_SAVE, (232, 208, 76, 26), s, f);
+        child(hwnd, w!("BUTTON"), "Cancelar", BS_PUSHBUTTON | tab, 0, ID_CANCEL, (312, 208, 76, 26), s, f);
 
         if let Ok(icon) = crate::tray::load_tray_icon() {
             send(hwnd, 0x80, WPARAM(0), LPARAM(icon.0 as isize)); // WM_SETICON, ICON_SMALL
