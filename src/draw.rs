@@ -69,6 +69,12 @@ pub fn arrow_head(a: Point, b: Point, len: f64) -> Option<(Point, Point)> {
 }
 
 /// Preenche um retângulo com cor semitransparente (marca-texto).
+/// COLORREF (0x00BBGGRR) para pixel de DIB de 32 bits (0x00RRGGBB). Sem a troca, o marcador
+/// de texto saía com vermelho e azul invertidos (amarelo virava ciano).
+fn colorref_to_pixel(c: u32) -> u32 {
+    ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF)
+}
+
 pub unsafe fn fill_alpha(hdc: HDC, r: Rect, color: u32, alpha: u8) {
     unsafe {
         let mem = CreateCompatibleDC(Some(hdc));
@@ -87,7 +93,7 @@ pub unsafe fn fill_alpha(hdc: HDC, r: Rect, color: u32, alpha: u8) {
         let mut bits: *mut c_void = null_mut();
         if let Ok(bmp) = CreateDIBSection(Some(mem), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) {
             if !bits.is_null() {
-                *(bits as *mut u32) = color;
+                *(bits as *mut u32) = colorref_to_pixel(color);
             }
             let old = SelectObject(mem, HGDIOBJ(bmp.0));
             let blend = BLENDFUNCTION {
@@ -277,5 +283,18 @@ mod tests {
     #[test]
     fn arrow_head_none_for_zero_length() {
         assert!(arrow_head(Point { x: 5, y: 5 }, Point { x: 5, y: 5 }, 10.0).is_none());
+    }
+}
+
+#[cfg(test)]
+mod color_tests {
+    use super::colorref_to_pixel;
+
+    #[test]
+    fn yellow_stays_yellow_in_dib() {
+        // Amarelo COLORREF = R 255, G 255, B 0.
+        assert_eq!(colorref_to_pixel(0x0000_FFFF), 0x00FF_FF00);
+        // Vermelho COLORREF vira R no byte alto do pixel.
+        assert_eq!(colorref_to_pixel(0x0000_00FF), 0x00FF_0000);
     }
 }
