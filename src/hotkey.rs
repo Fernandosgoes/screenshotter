@@ -11,7 +11,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 pub const ID_HOTKEY: i32 = 1;
 
 pub const WARN_FALLBACK: &str = "A combinação escolhida já está em uso por outro programa.\n\
-Usando PrtScn. Altere o atalho em settings.json (ao lado do .exe).";
+Usando PrtScn. Escolha outro atalho em Configurações (menu da bandeja).";
 
 /// (modificadores, tecla virtual) de cada escolha.
 fn keys(choice: HotkeyChoice) -> (HOT_KEY_MODIFIERS, u32) {

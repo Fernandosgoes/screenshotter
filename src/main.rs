@@ -17,6 +17,7 @@ mod log;
 mod model;
 mod overlay;
 mod pixelate;
+mod settings;
 mod startup;
 mod toolbar;
 mod tray;
@@ -27,10 +28,9 @@ use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARA
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
-use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MB_ICONINFORMATION, MB_OK, MSG,
-    MessageBoxW, PM_NOREMOVE, PeekMessageW, PostQuitMessage, RegisterClassW, SW_SHOWNORMAL,
+    MessageBoxW, PM_NOREMOVE, PeekMessageW, PostQuitMessage, RegisterClassW,
     TranslateMessage, WM_COMMAND, WM_DESTROY, WM_HOTKEY, WM_RBUTTONUP, WNDCLASSW, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
@@ -38,7 +38,7 @@ use windows::core::{PCWSTR, w};
 const MAIN_CLASS: PCWSTR = w!("ScreenshotterMain");
 const APP_NAME: PCWSTR = w!("Screenshotter");
 
-fn settings_path() -> PathBuf {
+pub(crate) fn settings_path() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("settings.json")))
@@ -62,7 +62,7 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
         WM_COMMAND => {
             match wp.0 & 0xFFFF {
                 id if id == tray::ID_MENU_EXIT => unsafe { PostQuitMessage(0) },
-                id if id == tray::ID_MENU_SETTINGS => open_settings(hwnd),
+                id if id == tray::ID_MENU_SETTINGS => settings::open(hwnd),
                 _ => {}
             }
             LRESULT(0)
@@ -73,20 +73,6 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
-    }
-}
-
-/// Abre settings.json no editor padrão. Se não existir, cria com os padrões, refletindo
-/// o estado atual de "iniciar com o Windows" (para não desfazer a opção do instalador).
-fn open_settings(hwnd: HWND) {
-    let path = settings_path();
-    if !path.exists() {
-        let s = Settings { start_with_windows: startup::is_enabled(), ..Settings::default() };
-        let _ = s.save(&path);
-    }
-    let wpath: Vec<u16> = path.display().to_string().encode_utf16().chain(std::iter::once(0)).collect();
-    unsafe {
-        ShellExecuteW(Some(hwnd), w!("open"), PCWSTR(wpath.as_ptr()), None, None, SW_SHOWNORMAL);
     }
 }
 
@@ -175,6 +161,9 @@ fn main() {
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            if settings::handle_dialog_message(&msg) {
+                continue;
+            }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
