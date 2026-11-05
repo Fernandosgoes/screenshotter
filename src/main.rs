@@ -153,9 +153,12 @@ fn main() {
     let settings = Settings::load(&settings_path());
     if settings_path().exists() {
         let want = settings.start_with_windows;
-        std::thread::spawn(move || {
-            let _ = startup::set_enabled(want);
-        });
+        // Só chama o reg.exe se o registro difere do desejado (normal: nenhum processo extra).
+        if startup::is_enabled() != want {
+            std::thread::spawn(move || {
+                let _ = startup::set_enabled(want);
+            });
+        }
     }
 
     unsafe {

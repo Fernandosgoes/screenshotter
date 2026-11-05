@@ -298,12 +298,17 @@ fn on_mouse_down(p: Point) {
         let mut g = s.borrow_mut();
         let sess = g.as_mut()?;
         let e = &mut sess.editor;
+        // X de cancelar: fecha a captura (só clicando nele; clique fora não fecha).
+        if e.cancel_hit(p) {
+            return Some(Cmd::Close);
+        }
         // As barras só existem (e só recebem clique) com a seleção pronta.
         let visible = e.toolbar_visible();
         if let (true, Some(sel)) = (visible, e.sel) {
             let l = toolbar::layout(sel, e.screen_rect());
             if let Some(b) = toolbar::hit(&l, p) {
                 return match b {
+                    Button::Move => { e.set_tool(Tool::Move); None }
                     Button::Pen => { e.set_tool(Tool::Pen); None }
                     Button::Line => { e.set_tool(Tool::Line); None }
                     Button::Arrow => { e.set_tool(Tool::Arrow); None }
@@ -321,7 +326,7 @@ fn on_mouse_down(p: Point) {
                 };
             }
             if e.palette_open {
-                if let Some(c) = toolbar::palette_hit(&l, p) {
+                if let Some(c) = toolbar::palette_hit(&l, e.palette_colors(), p) {
                     e.set_color(c);
                     return None;
                 }
@@ -441,11 +446,14 @@ fn paint_to(hdc: HDC) {
                     toolbar::paint_buttons(cv, &v, Some(active), sess.hover, e.color);
                     toolbar::paint_panel(cv, l.horizontal);
                     toolbar::paint_buttons(cv, &hz, None, sess.hover, e.color);
+                    if let Some(cr) = e.cancel_rect() {
+                        toolbar::paint_cancel(cv, cr);
+                    }
                     if e.palette_open {
                         toolbar::paint_palette(
                             cv,
-                            toolbar::palette_panel(&l),
-                            &toolbar::palette_rects(&l),
+                            toolbar::palette_panel(&l, e.palette_colors()),
+                            &toolbar::palette_rects(&l, e.palette_colors()),
                             e.color,
                         );
                     }
@@ -472,6 +480,7 @@ fn active_button(t: Tool) -> Button {
         Tool::Text => Button::Text,
         Tool::Pixelate => Button::Pixelate,
         Tool::Number => Button::Number,
+        Tool::Move => Button::Move,
     }
 }
 

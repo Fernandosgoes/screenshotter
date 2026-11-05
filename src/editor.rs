@@ -9,6 +9,11 @@ use crate::model::{Annotation, Document, bounds_of, text_line_height};
 /// Tolerância para pegar uma alça da seleção, em pixels.
 pub const HANDLE_TOL: i32 = 6;
 const MIN_SEL: i32 = 2;
+const NUMBER_COLORS: [Color; 3] = [Color::Red, Color::Green, Color::Blue];
+/// Lado do quadradinho com X (cancelar) no canto superior direito da seleção.
+pub const CANCEL_SIZE: i32 = 18;
+/// Distância do quadradinho X até as bordas da seleção.
+const CANCEL_INSET: i32 = 4;
 /// Margem entre o texto e a borda da caixa de edição.
 pub const TEXT_PAD: i32 = 5;
 /// Largura mínima da caixa de edição de texto (visível mesmo vazia).
@@ -25,6 +30,8 @@ pub enum Tool {
     Text,
     Pixelate,
     Number,
+    /// Cruz: arrastar dentro da seleção move a área (só com esta ferramenta).
+    Move,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,6 +39,8 @@ pub enum Interaction {
     Idle,
     Selecting { anchor: Point },
     ResizingSel { handle: Handle },
+    /// Movendo a seleção: `origin` é a seleção no início do arraste.
+    Moving { anchor: Point, origin: Rect },
     Drawing { start: Point },
 }
 
@@ -90,6 +99,15 @@ impl Editor {
         self.tool = t;
         self.doc.clear_selection();
         self.palette_open = false;
+        // Contador só usa vermelho/verde (branco some no fundo claro).
+        if !self.palette_colors().contains(&self.color) {
+            self.color = NUMBER_COLORS[0];
+        }
+    }
+
+    /// Cores oferecidas pela paleta: o contador só aceita vermelho e verde.
+    pub fn palette_colors(&self) -> &'static [Color] {
+        if self.tool == Tool::Number { &NUMBER_COLORS } else { &Color::ALL }
     }
 
     pub fn toggle_palette(&mut self) {
@@ -97,6 +115,9 @@ impl Editor {
     }
 
     pub fn set_color(&mut self, c: Color) {
+        if !self.palette_colors().contains(&c) {
+            return;
+        }
         self.color = c;
         self.palette_open = false;
         if let Some(i) = self.doc.selected() {
@@ -126,8 +147,28 @@ impl Editor {
         self.sel.is_some()
             && !matches!(
                 self.state,
-                Interaction::Selecting { .. } | Interaction::ResizingSel { .. }
+                Interaction::Selecting { .. }
+                    | Interaction::ResizingSel { .. }
+                    | Interaction::Moving { .. }
             )
+    }
+
+    /// Quadradinho X de cancelar: canto superior direito, por dentro da seleção.
+    pub fn cancel_rect(&self) -> Option<Rect> {
+        if !self.toolbar_visible() {
+            return None;
+        }
+        let sel = self.sel?;
+        Some(Rect {
+            x: sel.right() - CANCEL_INSET - CANCEL_SIZE,
+            y: sel.y + CANCEL_INSET,
+            w: CANCEL_SIZE,
+            h: CANCEL_SIZE,
+        })
+    }
+
+    pub fn cancel_hit(&self, p: Point) -> bool {
+        self.cancel_rect().is_some_and(|r| r.contains(p))
     }
 
     /// Caixa de edição do texto (com margem), visível mesmo com o texto vazio.
@@ -171,16 +212,17 @@ impl Editor {
         }
 
         if !sel.contains(p) {
-            // Clique fora da seleção: nova seleção.
-            self.state = Interaction::Selecting { anchor: p };
-            self.sel = Some(Rect::from_points(p, p));
-            self.doc.clear_selection();
+            // Clique fora da seleção não faz nada: a área só sai pelo X, pelo ESC
+            // ou depois de cancelar, quando dá para desenhar uma nova.
             return;
         }
 
-        // Dentro da seleção, o clique sempre usa a ferramenta atual: formas já desenhadas
+        // Dentro da seleção, o clique usa a ferramenta atual: formas já desenhadas
         // não são selecionadas nem movidas, assim dá para desenhar por cima e dentro delas.
         match self.tool {
+            Tool::Move => {
+                self.state = Interaction::Moving { anchor: p, origin: sel };
+            }
             Tool::Number => {
                 let n = self.doc.next_number();
                 self.doc.push(Annotation::Number { center: p, n, color: self.color });
@@ -220,6 +262,12 @@ impl Editor {
                     let r = sel.resize_by_handle(handle, p).clamp_to(self.screen_rect());
                     self.sel = Some(r);
                 }
+            }
+            Interaction::Moving { anchor, origin } => {
+                let screen = self.screen_rect();
+                let x = (origin.x + p.x - anchor.x).clamp(0, (screen.w - origin.w).max(0));
+                let y = (origin.y + p.y - anchor.y).clamp(0, (screen.h - origin.h).max(0));
+                self.sel = Some(Rect { x, y, ..origin });
             }
             Interaction::Drawing { start } => {
                 let shift_end = |to: Point| if shift { geom::constrain_45(start, to) } else { to };
@@ -317,8 +365,13 @@ impl Editor {
         match c {
             '1'..='6' => {
                 let idx = (c as u8 - b'1') as usize;
-                self.set_color(Color::ALL[idx]);
-                true
+                match self.palette_colors().get(idx) {
+                    Some(&col) => {
+                        self.set_color(col);
+                        true
+                    }
+                    None => false,
+                }
             }
             _ => false,
         }
@@ -522,5 +575,67 @@ mod tests {
         let mut e = Editor::test_new(800, 600);
         assert!(e.on_key_digit('2'));
         assert_eq!(e.color, Color::Blue);
+    }
+
+    #[test]
+    fn number_tool_only_red_green_blue() {
+        let mut e = Editor::test_new(100, 100);
+        e.set_color(Color::White);
+        e.set_tool(Tool::Number);
+        assert_eq!(e.color, Color::Red);
+        assert_eq!(e.palette_colors().len(), 3);
+        e.set_color(Color::Yellow);
+        assert_eq!(e.color, Color::Red);
+        e.set_color(Color::Blue);
+        assert_eq!(e.color, Color::Blue);
+        e.set_color(Color::Green);
+        assert_eq!(e.color, Color::Green);
+        e.set_tool(Tool::Pen);
+        assert_eq!(e.palette_colors().len(), 6);
+    }
+
+    #[test]
+    fn click_outside_selection_keeps_it() {
+        let mut e = Editor::test_new(800, 600);
+        e.on_mouse_down(Point { x: 100, y: 100 });
+        e.on_mouse_move(Point { x: 300, y: 300 }, false);
+        e.on_mouse_up();
+        let sel = e.sel;
+        e.on_mouse_down(Point { x: 600, y: 500 });
+        e.on_mouse_up();
+        assert_eq!(e.sel, sel, "clique fora não cancela a área");
+    }
+
+    #[test]
+    fn cancel_button_hit_test() {
+        let mut e = Editor::test_new(800, 600);
+        e.on_mouse_down(Point { x: 100, y: 100 });
+        e.on_mouse_move(Point { x: 300, y: 300 }, false);
+        e.on_mouse_up();
+        let cr = e.cancel_rect().expect("X visível com a barra");
+        assert!(e.cancel_hit(Point { x: cr.x + 2, y: cr.y + 2 }));
+        assert!(!e.cancel_hit(Point { x: 150, y: 150 }));
+    }
+
+    #[test]
+    fn move_tool_moves_selection_only_when_active() {
+        let mut e = Editor::test_new(800, 600);
+        e.sel = Some(Rect { x: 100, y: 100, w: 200, h: 100 });
+        // Com caneta, arrastar dentro da área desenha e não move.
+        e.on_mouse_down(Point { x: 150, y: 150 });
+        e.on_mouse_move(Point { x: 180, y: 180 }, false);
+        e.on_mouse_up();
+        assert_eq!(e.sel, Some(Rect { x: 100, y: 100, w: 200, h: 100 }));
+        // Com a cruz, arrastar move a área.
+        e.set_tool(Tool::Move);
+        e.on_mouse_down(Point { x: 150, y: 150 });
+        e.on_mouse_move(Point { x: 180, y: 190 }, false);
+        e.on_mouse_up();
+        assert_eq!(e.sel, Some(Rect { x: 130, y: 140, w: 200, h: 100 }));
+        // Não sai da tela.
+        e.on_mouse_down(Point { x: 200, y: 200 });
+        e.on_mouse_move(Point { x: 5000, y: 5000 }, false);
+        e.on_mouse_up();
+        assert_eq!(e.sel, Some(Rect { x: 600, y: 500, w: 200, h: 100 }));
     }
 }

@@ -25,6 +25,7 @@ const INK_ACTIVE_RGB: u32 = 0xFFFFFF;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Button {
+    Move,
     Pen,
     Line,
     Arrow,
@@ -41,7 +42,8 @@ pub enum Button {
     Close,
 }
 
-pub const VERTICAL: [Button; 11] = [
+pub const VERTICAL: [Button; 12] = [
+    Button::Move,
     Button::Pen,
     Button::Line,
     Button::Arrow,
@@ -95,17 +97,17 @@ pub fn hit(l: &BarLayout, p: Point) -> Option<Button> {
 }
 
 /// Painel da paleta: abre à esquerda da barra vertical, na linha do quadradinho de cor.
-pub fn palette_panel(l: &BarLayout) -> Rect {
+pub fn palette_panel(l: &BarLayout, colors: &[Color]) -> Rect {
     let row = VERTICAL.iter().position(|b| *b == Button::ColorSwatch).unwrap_or(9) as i32;
-    let w = Color::ALL.len() as i32 * (SWATCH + SWATCH_GAP) - SWATCH_GAP + 2 * PAD;
+    let w = colors.len() as i32 * (SWATCH + SWATCH_GAP) - SWATCH_GAP + 2 * PAD;
     let h = SWATCH + 2 * PAD;
     let center_y = l.vertical.y + PAD + row * BTN + BTN / 2;
     Rect { x: (l.vertical.x - GAP - w).max(0), y: center_y - h / 2, w, h }
 }
 
-pub fn palette_rects(l: &BarLayout) -> Vec<(Color, Rect)> {
-    let p = palette_panel(l);
-    Color::ALL
+pub fn palette_rects(l: &BarLayout, colors: &[Color]) -> Vec<(Color, Rect)> {
+    let p = palette_panel(l, colors);
+    colors
         .iter()
         .enumerate()
         .map(|(i, c)| {
@@ -114,8 +116,8 @@ pub fn palette_rects(l: &BarLayout) -> Vec<(Color, Rect)> {
         .collect()
 }
 
-pub fn palette_hit(l: &BarLayout, p: Point) -> Option<Color> {
-    palette_rects(l).into_iter().find(|(_, r)| r.contains(p)).map(|(c, _)| c)
+pub fn palette_hit(l: &BarLayout, colors: &[Color], p: Point) -> Option<Color> {
+    palette_rects(l, colors).into_iter().find(|(_, r)| r.contains(p)).map(|(c, _)| c)
 }
 
 fn rf(r: Rect) -> RectF {
@@ -151,6 +153,19 @@ pub fn paint_buttons(
     }
 }
 
+/// Quadradinho com X para cancelar a captura (canto superior direito da seleção).
+pub fn paint_cancel(cv: &Canvas, r: Rect) {
+    let rr = rf(r);
+    cv.shadow(rr, 4.0);
+    cv.fill_round(rr, 4.0, argb(0xF2, PANEL_RGB));
+    cv.stroke_round((rr.0 + 0.5, rr.1 + 0.5, rr.2 - 1.0, rr.3 - 1.0), 3.5, argb(0x30, 0xFFFFFF), 1.0);
+    let m = 5.0;
+    let (x0, y0) = (rr.0 + m, rr.1 + m);
+    let (x1, y1) = (rr.0 + rr.2 - m, rr.1 + rr.3 - m);
+    cv.line((x0, y0), (x1, y1), argb(0xFF, INK_ACTIVE_RGB), 1.8);
+    cv.line((x1, y0), (x0, y1), argb(0xFF, INK_ACTIVE_RGB), 1.8);
+}
+
 /// Paleta: bolinhas com a cor; a cor ativa tem anel de destaque.
 pub fn paint_palette(cv: &Canvas, panel: Rect, swatches: &[(Color, Rect)], current: Color) {
     paint_panel(cv, panel);
@@ -177,6 +192,15 @@ fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
     // Retângulo (x, y, largura, altura) relativo ao centro do botão.
     let q = |x: f32, y: f32, ww: f32, hh: f32| (cx + x * s, cy + y * s, ww * s, hh * s);
     match b {
+        Button::Move => {
+            // Cruz de quatro setas.
+            cv.line(p(-8.0, 0.0), p(8.0, 0.0), ink, w);
+            cv.line(p(0.0, -8.0), p(0.0, 8.0), ink, w);
+            cv.polyline(&[p(-3.0, -5.0), p(0.0, -8.0), p(3.0, -5.0)], ink, w);
+            cv.polyline(&[p(-3.0, 5.0), p(0.0, 8.0), p(3.0, 5.0)], ink, w);
+            cv.polyline(&[p(-5.0, -3.0), p(-8.0, 0.0), p(-5.0, 3.0)], ink, w);
+            cv.polyline(&[p(5.0, -3.0), p(8.0, 0.0), p(5.0, 3.0)], ink, w);
+        }
         Button::Pen => cv.curve(&[p(-8.0, 3.0), p(-3.0, -5.0), p(2.0, 4.0), p(8.0, -4.0)], ink, w),
         Button::Line => cv.line(p(-7.0, 7.0), p(7.0, -7.0), ink, w),
         Button::Arrow => {
@@ -278,7 +302,7 @@ mod tests {
         let sel = Rect { x: 100, y: 100, w: 200, h: 200 };
         let l = layout(sel, screen);
         let (v, _) = button_rects(&l);
-        let (b, r) = v[2];
+        let (b, r) = v[3];
         assert_eq!(hit(&l, Point { x: r.x + 1, y: r.y + 1 }), Some(b));
         assert_eq!(b, Button::Arrow);
     }
@@ -288,10 +312,10 @@ mod tests {
         let screen = Rect { x: 0, y: 0, w: 1000, h: 800 };
         let sel = Rect { x: 300, y: 300, w: 200, h: 200 };
         let l = layout(sel, screen);
-        let rects = palette_rects(&l);
+        let rects = palette_rects(&l, &Color::ALL);
         assert_eq!(rects.len(), 6);
         for (c, r) in rects {
-            assert_eq!(palette_hit(&l, Point { x: r.x + 2, y: r.y + 2 }), Some(c));
+            assert_eq!(palette_hit(&l, &Color::ALL, Point { x: r.x + 2, y: r.y + 2 }), Some(c));
         }
     }
 }
