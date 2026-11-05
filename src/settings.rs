@@ -230,7 +230,7 @@ pub fn open(main: HWND) {
         let mut r = RECT { left: 0, top: 0, right: sc(330), bottom: sc(218) };
         let _ = AdjustWindowRectEx(&mut r, style, false, WINDOW_EX_STYLE(0));
         let (ww, wh) = (r.right - r.left, r.bottom - r.top);
-        // Canto inferior direito da área de trabalho (acima da barra de tarefas), perto da bandeja.
+        // Centralizada na área de trabalho (acima da barra de tarefas), como no Lightshot.
         let mut wa = RECT::default();
         let _ = SystemParametersInfoW(
             SYSTEM_PARAMETERS_INFO_ACTION(48), // SPI_GETWORKAREA
@@ -238,9 +238,8 @@ pub fn open(main: HWND) {
             Some(&mut wa as *mut RECT as *mut _),
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         );
-        let margin = sc(12);
-        let x = wa.right - ww - margin;
-        let y = wa.bottom - wh - margin;
+        let x = wa.left + (wa.right - wa.left - ww) / 2;
+        let y = wa.top + (wa.bottom - wa.top - wh) / 2;
 
         let title = wide("Screenshotter — Configurações");
         let hwnd = match CreateWindowExW(
