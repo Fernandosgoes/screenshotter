@@ -1,5 +1,7 @@
 # Screenshotter
 
+![Screenshotter em uso](assets/preview.png)
+
 Capturador de tela para Windows, leve e sem rede. Você seleciona uma área, anota e copia ou salva a imagem. Roda na bandeja do sistema e não grava nada em disco sem você pedir.
 
 ## Instalação
