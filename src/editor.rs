@@ -33,7 +33,6 @@ pub enum Interaction {
     Selecting { anchor: Point },
     ResizingSel { handle: Handle },
     Drawing { start: Point },
-    Moving { last: Point },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -179,13 +178,8 @@ impl Editor {
             return;
         }
 
-        // Dentro da seleção: objeto existente tem prioridade (mover).
-        if self.doc.select_at(p).is_some() {
-            self.doc.begin_gesture();
-            self.state = Interaction::Moving { last: p };
-            return;
-        }
-
+        // Dentro da seleção, o clique sempre usa a ferramenta atual: formas já desenhadas
+        // não são selecionadas nem movidas, assim dá para desenhar por cima e dentro delas.
         match self.tool {
             Tool::Number => {
                 let n = self.doc.next_number();
@@ -248,10 +242,6 @@ impl Editor {
                     }
                 }
             }
-            Interaction::Moving { last } => {
-                self.doc.move_selected(p.x - last.x, p.y - last.y);
-                self.state = Interaction::Moving { last: p };
-            }
         }
     }
 
@@ -264,7 +254,6 @@ impl Editor {
                     }
                 }
             }
-            Interaction::Moving { .. } => self.doc.end_gesture(),
             _ => {}
         }
         self.state = Interaction::Idle;
@@ -392,6 +381,30 @@ mod tests {
         e.on_mouse_move(Point { x: 400, y: 390 }, true);
         e.on_mouse_up();
         assert!(matches!(e.doc.items()[0], Annotation::Line { b: Point { x: 390, y: 390 }, .. }));
+    }
+
+    #[test]
+    fn drawing_inside_an_existing_shape_does_not_move_it() {
+        let mut e = Editor::test_new(800, 600);
+        e.sel = Some(Rect { x: 0, y: 0, w: 800, h: 600 });
+        e.set_tool(Tool::Rect);
+        e.on_mouse_down(Point { x: 100, y: 100 });
+        e.on_mouse_move(Point { x: 400, y: 400 }, false);
+        e.on_mouse_up();
+        // Clique no meio do retângulo com outra ferramenta: desenha, não move.
+        e.set_tool(Tool::Line);
+        e.on_mouse_down(Point { x: 200, y: 200 });
+        assert!(matches!(e.state, Interaction::Drawing { .. }));
+        e.on_mouse_move(Point { x: 300, y: 250 }, false);
+        e.on_mouse_up();
+        assert_eq!(e.doc.items().len(), 2);
+        assert!(matches!(e.doc.items()[0], Annotation::Rect { r: Rect { x: 100, y: 100, w: 300, h: 300 }, .. }));
+        // Mesma ferramenta (retângulo) sobre a borda de outro retângulo também cria um novo.
+        e.set_tool(Tool::Rect);
+        e.on_mouse_down(Point { x: 100, y: 200 });
+        e.on_mouse_move(Point { x: 150, y: 260 }, false);
+        e.on_mouse_up();
+        assert_eq!(e.doc.items().len(), 3);
     }
 
     #[test]
