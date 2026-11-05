@@ -83,7 +83,47 @@ fn message(text: &str) {
     }
 }
 
+/// Reabre o próprio exe com STARTF_FORCEOFFFEEDBACK e encerra o processo atual na hora.
+/// O cursor de "aplicativo iniciando" (seta com círculo girando) pertence ao processo que o
+/// Explorer abriu; como este sai em milissegundos, o cursor some, e o processo novo já
+/// nasce sem esse aviso, mesmo na primeira execução, quando o Windows demora a verificar o exe.
+fn relaunch_without_busy_cursor() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        CreateProcessW, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_FORCEOFFFEEDBACK, STARTUPINFOW,
+    };
+    use windows::core::PWSTR;
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let mut cmd = format!("\"{}\"", exe.display());
+    for a in std::env::args().skip(1) {
+        cmd.push(' ');
+        cmd.push_str(&a);
+    }
+    cmd.push_str(" --child");
+    let mut wide: Vec<u16> = cmd.encode_utf16().chain(std::iter::once(0)).collect();
+    let si = STARTUPINFOW {
+        cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+        dwFlags: STARTF_FORCEOFFFEEDBACK,
+        ..Default::default()
+    };
+    let mut pi = PROCESS_INFORMATION::default();
+    unsafe {
+        if CreateProcessW(None, Some(PWSTR(wide.as_mut_ptr())), None, None, false, PROCESS_CREATION_FLAGS(0), None, None, &si, &mut pi)
+            .is_err()
+        {
+            return false;
+        }
+        let _ = CloseHandle(pi.hThread);
+        let _ = CloseHandle(pi.hProcess);
+    }
+    true
+}
+
 fn main() {
+    // Primeiro processo (aberto pelo Explorer): só relança e sai, sem o cursor de carregando.
+    if !std::env::args().any(|a| a == "--child") && relaunch_without_busy_cursor() {
+        return;
+    }
     // Avisa o Windows já na primeira linha que o app tem fila de mensagens: isso encerra o
     // cursor de "aplicativo iniciando" (seta com bolinha girando) em vez de esperá-lo estourar.
     unsafe {
