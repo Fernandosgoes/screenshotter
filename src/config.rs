@@ -50,6 +50,8 @@ pub struct Settings {
     pub stroke_width: u32,
     pub text_size: u32,
     pub default_color: Color,
+    /// Qualidade do JPEG ao salvar (1 a 100). Menor = arquivo mais leve.
+    pub jpeg_quality: u8,
 }
 
 impl Default for Settings {
@@ -60,6 +62,7 @@ impl Default for Settings {
             stroke_width: 3,
             text_size: 18,
             default_color: Color::Red,
+            jpeg_quality: 80,
         }
     }
 }
@@ -91,6 +94,7 @@ mod tests {
         assert_eq!(s.stroke_width, 3);
         assert_eq!(s.text_size, 18);
         assert_eq!(s.default_color, Color::Red);
+        assert_eq!(s.jpeg_quality, 80);
     }
 
     #[test]

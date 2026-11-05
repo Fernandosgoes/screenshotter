@@ -117,10 +117,44 @@ pub fn to_png(bgra: &[u8], w: u32, h: u32, path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Coloca a imagem na área de transferência como CF_DIB (cola em Word, Paint, Teams).
+/// Grava JPEG (qualidade 1..=100, croma 4:2:0) a partir do BGRA composto. É bem mais leve
+/// que PNG para capturas de tela. Sem canal alfa: a imagem final é sempre opaca.
+pub fn to_jpeg(bgra: &[u8], w: u32, h: u32, quality: u8, path: &Path) -> std::io::Result<()> {
+    if w == 0 || h == 0 || w > u16::MAX as u32 || h > u16::MAX as u32 {
+        return Err(std::io::Error::other("dimensões de imagem inválidas para JPEG"));
+    }
+    let rgb: Vec<u8> = bgra
+        .chunks_exact(4)
+        .flat_map(|p| [p[2], p[1], p[0]])
+        .collect();
+    let mut enc = jpeg_encoder::Encoder::new_file(path, quality.clamp(1, 100))
+        .map_err(std::io::Error::other)?;
+    enc.set_sampling_factor(jpeg_encoder::SamplingFactor::F_2_2);
+    enc.encode(&rgb, w as u16, h as u16, jpeg_encoder::ColorType::Rgb)
+        .map_err(std::io::Error::other)
+}
+
+/// Salva no formato pela extensão do caminho: `.png` mantém PNG (sem perda, maior);
+/// qualquer outra coisa vira JPEG, o padrão por ser o mais leve.
+pub fn save_image(bgra: &[u8], w: u32, h: u32, quality: u8, path: &Path) -> std::io::Result<()> {
+    let is_png = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+    if is_png {
+        to_png(bgra, w, h, path)
+    } else {
+        to_jpeg(bgra, w, h, quality, path)
+    }
+}
+
+/// Coloca a imagem na área de transferência como CF_DIB de 24 bits (cola em Word, Paint,
+/// Teams). 24 bits em vez de 32 deixa o bitmap 25% menor sem perder compatibilidade.
 pub fn copy_to_clipboard(hwnd: HWND, bgra: &[u8], w: i32, h: i32) -> windows::core::Result<()> {
     let header_size = std::mem::size_of::<BITMAPINFOHEADER>();
-    let row = (w * 4) as usize;
+    let src_row = (w * 4) as usize;
+    // Linhas de DIB são alinhadas em 4 bytes.
+    let row = ((w as usize * 3) + 3) & !3;
     let total = header_size + row * h as usize;
     unsafe {
         let hmem: HGLOBAL = GlobalAlloc(GMEM_MOVEABLE, total)?;
@@ -133,8 +167,9 @@ pub fn copy_to_clipboard(hwnd: HWND, bgra: &[u8], w: i32, h: i32) -> windows::co
             biWidth: w,
             biHeight: h, // bottom-up, formato CF_DIB padrão
             biPlanes: 1,
-            biBitCount: 32,
+            biBitCount: 24,
             biCompression: BI_RGB.0,
+            biSizeImage: (row * h as usize) as u32,
             ..Default::default()
         };
         std::ptr::copy_nonoverlapping(
@@ -143,9 +178,14 @@ pub fn copy_to_clipboard(hwnd: HWND, bgra: &[u8], w: i32, h: i32) -> windows::co
             header_size,
         );
         let dst = ptr.add(header_size);
+        std::ptr::write_bytes(dst, 0, row * h as usize);
         for y in 0..h as usize {
-            let src_row = &bgra[(h as usize - 1 - y) * row..(h as usize - y) * row];
-            std::ptr::copy_nonoverlapping(src_row.as_ptr(), dst.add(y * row), row);
+            let src = &bgra[(h as usize - 1 - y) * src_row..(h as usize - y) * src_row];
+            let out = dst.add(y * row);
+            for (x, px) in src.chunks_exact(4).enumerate() {
+                // BGRA -> BGR (descarta o alfa).
+                std::ptr::copy_nonoverlapping(px.as_ptr(), out.add(x * 3), 3);
+            }
         }
         let _ = GlobalUnlock(hmem);
 
@@ -158,11 +198,11 @@ pub fn copy_to_clipboard(hwnd: HWND, bgra: &[u8], w: i32, h: i32) -> windows::co
     }
 }
 
-/// Nome sugerido: Captura_AAAA-MM-DD_HH-MM-SS.png
+/// Nome sugerido: Captura_AAAA-MM-DD_HH-MM-SS.jpg
 pub fn suggested_name() -> String {
     let t = unsafe { GetLocalTime() };
     format!(
-        "Captura_{:04}-{:02}-{:02}_{:02}-{:02}-{:02}.png",
+        "Captura_{:04}-{:02}-{:02}_{:02}-{:02}-{:02}.jpg",
         t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
     )
 }
@@ -173,8 +213,12 @@ fn wide_z(s: &str) -> Vec<u16> {
 
 /// Abre "Salvar como". Não existe pasta padrão (decisão do PRD).
 pub fn save_dialog(hwnd: HWND) -> Option<PathBuf> {
-    let filter: Vec<u16> = "Imagem PNG (*.png)\0*.png\0\0".encode_utf16().collect();
-    let defext = wide_z("png");
+    // JPEG primeiro (padrão, mais leve); PNG continua disponível para quem precisar de
+    // imagem sem perda.
+    let filter: Vec<u16> = "Imagem JPEG - leve (*.jpg)\0*.jpg\0Imagem PNG (*.png)\0*.png\0\0"
+        .encode_utf16()
+        .collect();
+    let defext = wide_z("jpg");
     let mut file = vec![0u16; 260];
     let name = wide_z(&suggested_name());
     file[..name.len().min(259)].copy_from_slice(&name[..name.len().min(259)]);
@@ -274,8 +318,77 @@ mod tests {
         assert_eq!(&bytes[..8], &[137, 80, 78, 71, 13, 10, 26, 10]);
     }
 
+    /// Imagem tipo foto: gradiente com ruído leve (determinístico), onde PNG comprime mal.
+    fn photo_like(w: usize, h: usize) -> Vec<u8> {
+        let mut seed = 12345u32;
+        let mut px = Vec::with_capacity(w * h * 4);
+        for y in 0..h {
+            for x in 0..w {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                let noise = ((seed >> 24) & 0x1F) as i32;
+                let b = ((x * 255 / w) as i32 + noise).clamp(0, 255) as u8;
+                let g = ((y * 255 / h) as i32 + noise).clamp(0, 255) as u8;
+                let r = (((x + y) * 255 / (w + h)) as i32 + noise).clamp(0, 255) as u8;
+                px.extend_from_slice(&[b, g, r, 255]);
+            }
+        }
+        px
+    }
+
     #[test]
-    fn suggested_name_has_png_extension() {
-        assert!(suggested_name().ends_with(".png"));
+    fn jpeg_is_valid_and_lighter_than_png() {
+        let dir = std::env::temp_dir().join("shot_jpeg_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (w, h) = (320usize, 200usize);
+        let img = photo_like(w, h);
+        let jpg = dir.join("t.jpg");
+        let png = dir.join("t.png");
+        to_jpeg(&img, w as u32, h as u32, 80, &jpg).unwrap();
+        to_png(&img, w as u32, h as u32, &png).unwrap();
+        let jb = std::fs::read(&jpg).unwrap();
+        assert_eq!(&jb[..2], &[0xFF, 0xD8], "começa com SOI");
+        assert_eq!(&jb[jb.len() - 2..], &[0xFF, 0xD9], "termina com EOI");
+        let pn = std::fs::metadata(&png).unwrap().len();
+        assert!(
+            (jb.len() as u64) < pn,
+            "JPEG ({} B) deve ser mais leve que PNG ({} B)",
+            jb.len(),
+            pn
+        );
+    }
+
+    #[test]
+    fn lower_quality_gives_lighter_jpeg() {
+        let dir = std::env::temp_dir().join("shot_jpeg_q");
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = photo_like(320, 200);
+        let hi = dir.join("hi.jpg");
+        let lo = dir.join("lo.jpg");
+        to_jpeg(&img, 320, 200, 95, &hi).unwrap();
+        to_jpeg(&img, 320, 200, 40, &lo).unwrap();
+        assert!(std::fs::metadata(&lo).unwrap().len() < std::fs::metadata(&hi).unwrap().len());
+    }
+
+    #[test]
+    fn save_image_picks_format_by_extension() {
+        let dir = std::env::temp_dir().join("shot_save_ext");
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = photo_like(16, 16);
+        let (j, p) = (dir.join("a.jpg"), dir.join("b.PNG"));
+        save_image(&img, 16, 16, 80, &j).unwrap();
+        save_image(&img, 16, 16, 80, &p).unwrap();
+        assert_eq!(&std::fs::read(&j).unwrap()[..2], &[0xFF, 0xD8]);
+        assert_eq!(&std::fs::read(&p).unwrap()[..4], &[137, 80, 78, 71]);
+    }
+
+    #[test]
+    fn jpeg_rejects_empty_image() {
+        let p = std::env::temp_dir().join("shot_jpeg_empty.jpg");
+        assert!(to_jpeg(&[], 0, 0, 80, &p).is_err());
+    }
+
+    #[test]
+    fn suggested_name_has_jpg_extension() {
+        assert!(suggested_name().ends_with(".jpg"));
     }
 }

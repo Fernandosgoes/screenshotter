@@ -51,6 +51,8 @@ pub struct Editor {
     pub color: Color,
     pub stroke: u32,
     pub text_size: u32,
+    /// Qualidade do JPEG ao salvar (vem das configurações).
+    pub jpeg_quality: u8,
     pub palette_open: bool,
     pub state: Interaction,
     pub text: Option<TextEdit>,
@@ -67,6 +69,7 @@ impl Editor {
             color: settings.default_color,
             stroke: settings.stroke_width,
             text_size: settings.text_size,
+            jpeg_quality: settings.jpeg_quality,
             palette_open: false,
             state: Interaction::Idle,
             text: None,
