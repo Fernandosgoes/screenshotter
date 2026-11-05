@@ -623,12 +623,12 @@ fn save_and_close() {
         s.borrow().as_ref().and_then(|sess| {
             let sel = sess.editor.sel?;
             let bgra = export::compose(&sess.editor.capture, sel, &sess.editor.doc);
-            Some((sess.hwnd, bgra, sel.w, sel.h, sess.editor.jpeg_quality))
+            Some((sess.hwnd, bgra, sel.w, sel.h, sess.editor.jpeg_quality, sess.editor.save_format))
         })
     });
-    let Some((hwnd, bgra, w, h, quality)) = data else { return };
+    let Some((hwnd, bgra, w, h, quality, fmt)) = data else { return };
     // Diálogo modal: nenhum borrow ativo aqui.
-    if let Some(path) = export::save_dialog(hwnd) {
+    if let Some(path) = export::save_dialog(hwnd, fmt) {
         if export::save_image(&bgra, w as u32, h as u32, quality, &path).is_ok() {
             finish();
         }

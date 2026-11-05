@@ -66,7 +66,7 @@ A barra vertical, ao lado da seleção, tem as ferramentas:
 ### 5. Copiar ou salvar
 
 - **Copiar para a área de transferência:** botão de copiar na barra horizontal, ou **Ctrl + C**. Depois é só colar (Ctrl + V) em qualquer lugar.
-- **Salvar em arquivo:** botão de salvar na barra horizontal, ou **Ctrl + S**. Escolha o nome e a pasta; o formato (PNG ou JPG) vem da extensão do arquivo.
+- **Salvar em arquivo:** botão de salvar na barra horizontal, ou **Ctrl + S**. Escolha o nome e a pasta. O diálogo abre com o formato padrão das configurações (JPG ou PNG); a extensão que você digitar no nome do arquivo define o formato final.
 
 Depois de copiar ou salvar, a captura fecha.
 
@@ -75,6 +75,7 @@ Depois de copiar ou salvar, a captura fecha.
 Clique com o botão direito no ícone da bandeja → **Configurações**. Lá você pode:
 
 - trocar o atalho de captura: Shift + Backspace, Print Screen, Shift + Print Screen ou **Personalizado**. Em Personalizado, clique no campo **Tecla personalizada** e pressione a combinação desejada (ex.: Ctrl + Alt + S). A combinação precisa ter Ctrl, Alt ou Shift, ou ser uma tecla F;
+- escolher o formato padrão de salvamento: JPG (leve, padrão) ou PNG (sem perda);
 - ativar ou desativar a abertura com o Windows;
 - ajustar a espessura padrão do traço, o tamanho padrão do texto e a cor padrão.
 

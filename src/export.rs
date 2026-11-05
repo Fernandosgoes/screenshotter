@@ -2,6 +2,7 @@
 //! PNG, área de transferência (CF_DIB) e diálogo "Salvar como" (sem pasta padrão).
 
 use crate::capture::Capture;
+use crate::config::ImageFormat;
 use crate::draw;
 use crate::geom::Rect;
 use crate::model::{Annotation, Document};
@@ -198,29 +199,45 @@ pub fn copy_to_clipboard(hwnd: HWND, bgra: &[u8], w: i32, h: i32) -> windows::co
     }
 }
 
-/// Nome sugerido: Captura_AAAA-MM-DD_HH-MM-SS.jpg
-pub fn suggested_name() -> String {
+/// Nome sugerido: Screenshot_AAAA-MM-DD_HH-MM-SS.jpg (ou .png, conforme o formato).
+pub fn suggested_name(fmt: ImageFormat) -> String {
     let t = unsafe { GetLocalTime() };
     format!(
-        "Captura_{:04}-{:02}-{:02}_{:02}-{:02}-{:02}.jpg",
-        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
+        "Screenshot_{:04}-{:02}-{:02}_{:02}-{:02}-{:02}.{}",
+        t.wYear,
+        t.wMonth,
+        t.wDay,
+        t.wHour,
+        t.wMinute,
+        t.wSecond,
+        ext(fmt)
     )
+}
+
+fn ext(fmt: ImageFormat) -> &'static str {
+    match fmt {
+        ImageFormat::Jpg => "jpg",
+        ImageFormat::Png => "png",
+    }
 }
 
 fn wide_z(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// Abre "Salvar como". Não existe pasta padrão (decisão do PRD).
-pub fn save_dialog(hwnd: HWND) -> Option<PathBuf> {
-    // JPEG primeiro (padrão, mais leve); PNG continua disponível para quem precisar de
-    // imagem sem perda.
-    let filter: Vec<u16> = "Imagem JPEG - leve (*.jpg)\0*.jpg\0Imagem PNG (*.png)\0*.png\0\0"
-        .encode_utf16()
-        .collect();
-    let defext = wide_z("jpg");
+/// Abre "Salvar como". Não existe pasta padrão (decisão do PRD). O formato escolhido nas
+/// configurações vem primeiro no filtro e define a extensão padrão e o nome sugerido.
+pub fn save_dialog(hwnd: HWND, fmt: ImageFormat) -> Option<PathBuf> {
+    let jpg = "Imagem JPEG - leve (*.jpg)\0*.jpg\0";
+    let png = "Imagem PNG - sem perda (*.png)\0*.png\0";
+    let filter_str = match fmt {
+        ImageFormat::Jpg => format!("{jpg}{png}\0"),
+        ImageFormat::Png => format!("{png}{jpg}\0"),
+    };
+    let filter: Vec<u16> = filter_str.encode_utf16().collect();
+    let defext = wide_z(ext(fmt));
     let mut file = vec![0u16; 260];
-    let name = wide_z(&suggested_name());
+    let name = wide_z(&suggested_name(fmt));
     file[..name.len().min(259)].copy_from_slice(&name[..name.len().min(259)]);
     unsafe {
         let mut ofn = OPENFILENAMEW {
@@ -389,6 +406,7 @@ mod tests {
 
     #[test]
     fn suggested_name_has_jpg_extension() {
-        assert!(suggested_name().ends_with(".jpg"));
+        assert!(suggested_name(ImageFormat::Jpg).ends_with(".jpg"));
+        assert!(suggested_name(ImageFormat::Png).ends_with(".png"));
     }
 }

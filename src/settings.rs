@@ -3,7 +3,7 @@
 //! JPEG não é exposta aqui: fica no valor do settings.json (padrão 80). Salvar grava settings.json,
 //! registra o novo atalho na hora e ajusta a inicialização automática.
 
-use crate::config::{Color, Hotkey, HotkeyChoice, Settings};
+use crate::config::{Color, Hotkey, HotkeyChoice, ImageFormat, Settings};
 use crate::{hotkey, startup};
 use windows::Win32::UI::Controls::{ICC_HOTKEY_CLASS, INITCOMMONCONTROLSEX, InitCommonControlsEx};
 use crate::gfx::{Canvas, argb_from_colorref};
@@ -32,6 +32,7 @@ const ID_HOTKEY: i32 = 101;
 const ID_COLOR: i32 = 102;
 const ID_STARTUP: i32 = 106;
 const ID_CUSTOM: i32 = 107;
+const ID_FORMAT: i32 = 108;
 const ID_SAVE: i32 = 1; // IDOK: Enter aciona
 const ID_CANCEL: i32 = 2; // IDCANCEL: Esc aciona
 
@@ -148,6 +149,11 @@ fn sync_custom(hwnd: HWND) {
         let _ = EnableWindow(custom, sel == CUSTOM_INDEX as isize);
     }
 }
+
+const FORMATS: [(ImageFormat, &str); 2] = [
+    (ImageFormat::Jpg, "JPG (leve)"),
+    (ImageFormat::Png, "PNG (sem perda)"),
+];
 
 const COLORS: [(Color, &str); 6] = [
     (Color::Yellow, "Amarelo"),
@@ -422,6 +428,10 @@ fn save(hwnd: HWND) {
         if let Some((c, _)) = COLORS.get(co as usize) {
             s.default_color = *c;
         }
+        let fo = send(item(ID_FORMAT), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0;
+        if let Some((f, _)) = FORMATS.get(fo as usize) {
+            s.save_format = *f;
+        }
         s.start_with_windows = send(item(ID_STARTUP), BM_GETCHECK, WPARAM(0), LPARAM(0)).0 == 1;
     }
     s.stroke_width = slider(0);
@@ -492,7 +502,7 @@ pub fn open(main: HWND) {
         DRAG.store(9, Ordering::Relaxed);
         let sc = |v: i32| (v as f32 * s).round() as i32;
         let style = WS_CAPTION | WS_SYSMENU;
-        let mut r = RECT { left: 0, top: 0, right: sc(400), bottom: sc(272) };
+        let mut r = RECT { left: 0, top: 0, right: sc(400), bottom: sc(300) };
         let _ = AdjustWindowRectEx(&mut r, style, false, WINDOW_EX_STYLE(0));
         let (ww, wh) = (r.right - r.left, r.bottom - r.top);
         // Centralizada na área de trabalho (acima da barra de tarefas), como no Lightshot.
@@ -575,11 +585,20 @@ pub fn open(main: HWND) {
         }
         sync_custom(hwnd);
 
-        let cb = child(hwnd, w!("BUTTON"), "Iniciar com o Windows", BS_AUTOCHECKBOX | tab, 0, ID_STARTUP, (12, 206, 376, 20), s, f);
+        label("Formato ao salvar", 206);
+        let fm = child(hwnd, w!("COMBOBOX"), "", CBS_DROPDOWNLIST | tab, 0, ID_FORMAT, (170, 203, 218, 200), s, f);
+        for (_, n) in FORMATS {
+            let t = wide(n);
+            send(fm, CB_ADDSTRING, WPARAM(0), LPARAM(t.as_ptr() as isize));
+        }
+        let idx = FORMATS.iter().position(|(c, _)| *c == cur.save_format).unwrap_or(0);
+        send(fm, CB_SETCURSEL, WPARAM(idx), LPARAM(0));
+
+        let cb = child(hwnd, w!("BUTTON"), "Iniciar com o Windows", BS_AUTOCHECKBOX | tab, 0, ID_STARTUP, (12, 232, 376, 20), s, f);
         send(cb, BM_SETCHECK, WPARAM(cur.start_with_windows as usize), LPARAM(0));
 
-        child(hwnd, w!("BUTTON"), "Salvar", BS_DEFPUSHBUTTON | tab, 0, ID_SAVE, (232, 236, 76, 26), s, f);
-        child(hwnd, w!("BUTTON"), "Cancelar", BS_PUSHBUTTON | tab, 0, ID_CANCEL, (312, 236, 76, 26), s, f);
+        child(hwnd, w!("BUTTON"), "Salvar", BS_DEFPUSHBUTTON | tab, 0, ID_SAVE, (232, 262, 76, 26), s, f);
+        child(hwnd, w!("BUTTON"), "Cancelar", BS_PUSHBUTTON | tab, 0, ID_CANCEL, (312, 262, 76, 26), s, f);
 
         if let Ok(icon) = crate::tray::load_tray_icon() {
             send(hwnd, 0x80, WPARAM(0), LPARAM(icon.0 as isize)); // WM_SETICON, ICON_SMALL

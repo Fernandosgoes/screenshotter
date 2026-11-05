@@ -11,6 +11,14 @@ pub enum HotkeyChoice {
     Custom,
 }
 
+/// Formato sugerido no "Salvar como". O usuário ainda pode digitar outra extensão.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImageFormat {
+    #[default]
+    Jpg,
+    Png,
+}
+
 /// Atalho personalizado: `mods` usa os bits de MOD_ALT (1), MOD_CONTROL (2) e MOD_SHIFT (4);
 /// `vk` é a tecla virtual do Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +72,8 @@ pub struct Settings {
     pub default_color: Color,
     /// Qualidade do JPEG ao salvar (1 a 100). Menor = arquivo mais leve.
     pub jpeg_quality: u8,
+    /// Formato padrão do "Salvar como".
+    pub save_format: ImageFormat,
 }
 
 impl Default for Settings {
@@ -76,6 +86,7 @@ impl Default for Settings {
             text_size: 18,
             default_color: Color::Red,
             jpeg_quality: 80,
+            save_format: ImageFormat::Jpg,
         }
     }
 }
@@ -118,6 +129,16 @@ mod tests {
         let p = dir.join("settings.json");
         std::fs::write(&p, r#"{ "stroke_width": 5, "text_background": true }"#).unwrap();
         assert_eq!(Settings::load(&p).stroke_width, 5);
+    }
+
+    #[test]
+    fn save_format_round_trips() {
+        let dir = std::env::temp_dir().join("shot_cfg_fmt");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("settings.json");
+        let s = Settings { save_format: ImageFormat::Png, ..Settings::default() };
+        s.save(&p).unwrap();
+        assert_eq!(Settings::load(&p).save_format, ImageFormat::Png);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! Não toca Win32. Recebe eventos já traduzidos e muda o `Document`.
 
 use crate::capture::Capture;
-use crate::config::{Color, Settings};
+use crate::config::{Color, ImageFormat, Settings};
 use crate::geom::{self, Handle, Point, Rect};
 use crate::model::{Annotation, Document, bounds_of, text_line_height};
 
@@ -61,6 +61,8 @@ pub struct Editor {
     pub text_size: u32,
     /// Qualidade do JPEG ao salvar (vem das configurações).
     pub jpeg_quality: u8,
+    /// Formato sugerido no "Salvar como" (vem das configurações).
+    pub save_format: ImageFormat,
     pub palette_open: bool,
     pub state: Interaction,
     pub text: Option<TextEdit>,
@@ -78,6 +80,7 @@ impl Editor {
             stroke: settings.stroke_width,
             text_size: settings.text_size,
             jpeg_quality: settings.jpeg_quality,
+            save_format: settings.save_format,
             palette_open: false,
             state: Interaction::Idle,
             text: None,
