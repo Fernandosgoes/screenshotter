@@ -32,6 +32,8 @@ pub enum Tool {
     Number,
     /// Cruz: arrastar dentro da seleção move a área (só com esta ferramenta).
     Move,
+    /// Mover só um texto já colocado (ícone ao lado do T).
+    MoveText,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -41,6 +43,8 @@ pub enum Interaction {
     ResizingSel { handle: Handle },
     /// Movendo a seleção: `origin` é a seleção no início do arraste.
     Moving { anchor: Point, origin: Rect },
+    /// Movendo um texto: `anchor` é o mouse no início do arraste e `origin` o canto do texto.
+    MovingText { anchor: Point, origin: Point },
     Drawing { start: Point },
 }
 
@@ -153,6 +157,7 @@ impl Editor {
                 Interaction::Selecting { .. }
                     | Interaction::ResizingSel { .. }
                     | Interaction::Moving { .. }
+                    | Interaction::MovingText { .. }
             )
     }
 
@@ -226,6 +231,14 @@ impl Editor {
             Tool::Move => {
                 self.state = Interaction::Moving { anchor: p, origin: sel };
             }
+            Tool::MoveText => {
+                if self.doc.select_text_at(p) {
+                    if let Some(origin) = self.doc.selected_text_origin() {
+                        self.doc.begin_gesture();
+                        self.state = Interaction::MovingText { anchor: p, origin };
+                    }
+                }
+            }
             Tool::Number => {
                 let n = self.doc.next_number();
                 self.doc.push(Annotation::Number { center: p, n, color: self.color });
@@ -272,6 +285,11 @@ impl Editor {
                 let y = (origin.y + p.y - anchor.y).clamp(0, (screen.h - origin.h).max(0));
                 self.sel = Some(Rect { x, y, ..origin });
             }
+            Interaction::MovingText { anchor, origin } => {
+                let area = self.sel.unwrap_or(self.screen_rect());
+                let to = Point { x: origin.x + p.x - anchor.x, y: origin.y + p.y - anchor.y };
+                self.doc.place_selected_text(to, area);
+            }
             Interaction::Drawing { start } => {
                 let shift_end = |to: Point| if shift { geom::constrain_45(start, to) } else { to };
                 let rect = |to: Point| {
@@ -297,6 +315,9 @@ impl Editor {
     }
 
     pub fn on_mouse_up(&mut self) {
+        if let Interaction::MovingText { .. } = self.state {
+            self.doc.end_gesture();
+        }
         match self.state {
             Interaction::Selecting { .. } | Interaction::ResizingSel { .. } => {
                 if let Some(sel) = self.sel {

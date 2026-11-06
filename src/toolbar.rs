@@ -18,10 +18,12 @@ const PANEL_RADIUS: f32 = 12.0;
 const BTN_RADIUS: f32 = 8.0;
 
 // Cores em 0xRRGGBB (o alfa é aplicado em cada uso).
-const PANEL_RGB: u32 = 0x0F172A; // slate-900
-const ACCENT_RGB: u32 = 0x6366F1; // indigo-500
-const INK_RGB: u32 = 0xE2E8F0; // slate-200
-const INK_ACTIVE_RGB: u32 = 0xFFFFFF;
+const PANEL_RGB: u32 = 0xFFFFFF; // painel branco
+const ACCENT_RGB: u32 = 0x272C38; // grafite: botão ativo
+const INK_RGB: u32 = 0x171A24; // ícones em quase preto
+const INK_ACTIVE_RGB: u32 = 0xFFFFFF; // ícone no botão ativo
+const HOVER_RGB: u32 = 0xECEEF2; // cinza do hover
+const BORDER_RGB: u32 = 0xD9DCE4; // borda do painel
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Button {
@@ -42,6 +44,8 @@ pub enum Button {
     Copy,
     Save,
     Close,
+    /// Ícone de mover texto, que aparece ao lado do T (não faz parte das barras).
+    TextMove,
 }
 
 pub const VERTICAL: [Button; 13] = [
@@ -69,10 +73,24 @@ fn pad(r: Rect) -> Rect {
 /// Painéis (com margem) das duas barras, sempre inteiramente dentro de `screen`.
 pub fn layout(sel: Rect, screen: Rect) -> BarLayout {
     let base = layout_bars(sel, screen, VERTICAL.len() as i32, HORIZONTAL.len() as i32, BTN);
+    let vertical = shift_inside(pad(base.vertical), screen);
+    // Ícone de mover texto: do lado de fora da barra, na linha do T; do lado de dentro só se
+    // não couber na tela.
+    let row = VERTICAL.iter().position(|b| *b == Button::Text).unwrap_or(7) as i32;
+    let size = BTN + 2 * PAD;
+    let y = vertical.y + row * BTN;
+    let outside_x = vertical.right() + GAP;
+    let x = if outside_x + size <= screen.right() { outside_x } else { (vertical.x - GAP - size).max(0) };
     BarLayout {
-        vertical: shift_inside(pad(base.vertical), screen),
+        vertical,
         horizontal: shift_inside(pad(base.horizontal), screen),
+        text_move: Rect { x, y, w: size, h: size },
     }
+}
+
+/// Retângulo do botão de mover texto, dentro do seu painel.
+pub fn text_move_button(panel: Rect) -> Rect {
+    Rect { x: panel.x + PAD, y: panel.y + PAD, w: BTN, h: BTN }
 }
 
 /// Retângulo de cada botão, na ordem de `VERTICAL` e `HORIZONTAL`.
@@ -95,6 +113,9 @@ pub fn button_rects(l: &BarLayout) -> (Vec<(Button, Rect)>, Vec<(Button, Rect)>)
 }
 
 pub fn hit(l: &BarLayout, p: Point) -> Option<Button> {
+    if l.text_move.contains(p) {
+        return Some(Button::TextMove);
+    }
     let (v, h) = button_rects(l);
     v.into_iter().chain(h).find(|(_, r)| r.contains(p)).map(|(b, _)| b)
 }
@@ -131,8 +152,8 @@ fn rf(r: Rect) -> RectF {
 pub fn paint_panel(cv: &Canvas, panel: Rect) {
     let r = rf(panel);
     cv.shadow(r, PANEL_RADIUS);
-    cv.fill_round(r, PANEL_RADIUS, argb(0xF2, PANEL_RGB));
-    cv.stroke_round((r.0 + 0.5, r.1 + 0.5, r.2 - 1.0, r.3 - 1.0), PANEL_RADIUS - 0.5, argb(0x30, 0xFFFFFF), 1.0);
+    cv.fill_round(r, PANEL_RADIUS, argb(0xFF, PANEL_RGB));
+    cv.stroke_round((r.0 + 0.5, r.1 + 0.5, r.2 - 1.0, r.3 - 1.0), PANEL_RADIUS - 0.5, argb(0xFF, BORDER_RGB), 1.0);
 }
 
 /// Pinta os botões de uma barra: destaque no ativo, realce no hover, ícones.
@@ -150,7 +171,7 @@ pub fn paint_buttons(
         if is_active {
             cv.fill_round(inner, BTN_RADIUS, argb(0xFF, ACCENT_RGB));
         } else if Some(*b) == hover {
-            cv.fill_round(inner, BTN_RADIUS, argb(0x26, 0xFFFFFF));
+            cv.fill_round(inner, BTN_RADIUS, argb(0xFF, HOVER_RGB));
         }
         draw_icon(cv, *b, *r, current, is_active);
     }
@@ -160,13 +181,13 @@ pub fn paint_buttons(
 pub fn paint_cancel(cv: &Canvas, r: Rect) {
     let rr = rf(r);
     cv.shadow(rr, 4.0);
-    cv.fill_round(rr, 4.0, argb(0xF2, PANEL_RGB));
-    cv.stroke_round((rr.0 + 0.5, rr.1 + 0.5, rr.2 - 1.0, rr.3 - 1.0), 3.5, argb(0x30, 0xFFFFFF), 1.0);
+    cv.fill_round(rr, 4.0, argb(0xFF, PANEL_RGB));
+    cv.stroke_round((rr.0 + 0.5, rr.1 + 0.5, rr.2 - 1.0, rr.3 - 1.0), 3.5, argb(0xFF, BORDER_RGB), 1.0);
     let m = 5.0;
     let (x0, y0) = (rr.0 + m, rr.1 + m);
     let (x1, y1) = (rr.0 + rr.2 - m, rr.1 + rr.3 - m);
-    cv.line((x0, y0), (x1, y1), argb(0xFF, INK_ACTIVE_RGB), 1.8);
-    cv.line((x1, y0), (x0, y1), argb(0xFF, INK_ACTIVE_RGB), 1.8);
+    cv.line((x0, y0), (x1, y1), argb(0xFF, INK_RGB), 1.8);
+    cv.line((x1, y0), (x0, y1), argb(0xFF, INK_RGB), 1.8);
 }
 
 /// Paleta: bolinhas com a cor; a cor ativa tem anel de destaque.
@@ -175,9 +196,11 @@ pub fn paint_palette(cv: &Canvas, panel: Rect, swatches: &[(Color, Rect)], curre
     for (c, r) in swatches {
         let rr = rf(*r);
         cv.fill_ellipse(rr, argb_from_colorref(c.colorref()));
-        cv.stroke_ellipse(rr, argb(0x66, 0xFFFFFF), 1.2);
+        // Contorno de contraste: preto ganha branco por dentro; as outras cores ganham preto.
+        let outline = if *c == Color::Black { 0xFFFFFF } else { 0x000000 };
+        cv.stroke_ellipse(rr, argb(0xFF, outline), 1.2);
         if *c == current {
-            cv.stroke_ellipse((rr.0 - 3.5, rr.1 - 3.5, rr.2 + 7.0, rr.3 + 7.0), argb(0xFF, 0xFFFFFF), 2.0);
+            cv.stroke_ellipse((rr.0 - 3.5, rr.1 - 3.5, rr.2 + 7.0, rr.3 + 7.0), argb(0xFF, ACCENT_RGB), 2.0);
         }
     }
 }
@@ -195,7 +218,7 @@ fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
     // Retângulo (x, y, largura, altura) relativo ao centro do botão.
     let q = |x: f32, y: f32, ww: f32, hh: f32| (cx + x * s, cy + y * s, ww * s, hh * s);
     match b {
-        Button::Move => {
+        Button::Move | Button::TextMove => {
             // Cruz de quatro setas.
             cv.line(p(-8.0, 0.0), p(8.0, 0.0), ink, w);
             cv.line(p(0.0, -8.0), p(0.0, 8.0), ink, w);
@@ -235,7 +258,8 @@ fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
         Button::ColorSwatch => {
             let rr = q(-9.0, -9.0, 18.0, 18.0);
             cv.fill_ellipse(rr, argb_from_colorref(current.colorref()));
-            cv.stroke_ellipse(rr, argb(0x99, 0xFFFFFF), 1.4);
+            let outline = if current == Color::Black { 0xFFFFFF } else { 0x000000 };
+            cv.stroke_ellipse(rr, argb(0xFF, outline), 1.4);
         }
         Button::Undo => {
             cv.curve(&[p(-8.0, 0.0), p(-1.0, -2.0), p(6.0, 1.0), p(7.0, 6.0)], ink, w);

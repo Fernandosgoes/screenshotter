@@ -52,11 +52,16 @@ pub fn bounds_of(a: &Annotation) -> Rect {
             let lines = text.split('\n').count() as i32;
             let longest = text.split('\n').map(|l| l.chars().count()).max().unwrap_or(0) as i32;
             let size = *size as i32;
+            // Mesma caixa do balão desenhado: texto com folga, sem passar do tamanho real.
+            // A largura é uma estimativa acima da média dos caracteres, para o clamp não deixar
+            // o balão sair da seleção.
+            let line_h = text_line_height(size as u32);
+            let pad = crate::editor::TEXT_PAD;
             Rect {
-                x: at.x,
-                y: at.y,
-                w: (longest * size * 6 / 10).max(1),
-                h: (lines * text_line_height(size as u32)).max(1),
+                x: at.x - pad,
+                y: at.y - pad,
+                w: (longest * size * 3 / 4 + 2 * pad + 4).max(crate::editor::TEXT_MIN_W),
+                h: (lines * line_h + 2 * pad).max(line_h + 2 * pad),
             }
         }
         Annotation::Number { center, .. } => Rect {
@@ -179,6 +184,49 @@ impl Document {
         });
         self.selected = hit.map(|(i, _)| i);
         self.selected
+    }
+
+    /// Seleciona o texto mais recente sob o ponto (ignora formas e números).
+    pub fn select_text_at(&mut self, p: Point) -> bool {
+        let hit = self.items.iter().enumerate().rev().find(|(_, a)| {
+            if !matches!(a, Annotation::Text { .. }) {
+                return false;
+            }
+            let b = bounds_of(a);
+            Rect {
+                x: b.x - HIT_TOL,
+                y: b.y - HIT_TOL,
+                w: b.w + 2 * HIT_TOL,
+                h: b.h + 2 * HIT_TOL,
+            }
+            .contains(p)
+        });
+        self.selected = hit.map(|(i, _)| i);
+        self.selected.is_some()
+    }
+
+    /// Canto do texto selecionado (se o objeto selecionado for um texto).
+    pub fn selected_text_origin(&self) -> Option<Point> {
+        match self.selected.and_then(|i| self.items.get(i)) {
+            Some(Annotation::Text { at, .. }) => Some(*at),
+            _ => None,
+        }
+    }
+
+    /// Põe o texto selecionado com o canto em `to`, mantendo-o inteiro dentro de `area`.
+    pub fn place_selected_text(&mut self, to: Point, area: Rect) {
+        let Some(i) = self.selected else { return };
+        let Some(a) = self.items.get(i) else { return };
+        let Annotation::Text { at, .. } = a else { return };
+        let b = bounds_of(a);
+        let (ox, oy) = (b.x - at.x, b.y - at.y);
+        // Limites do canto: a caixa do texto inteira precisa caber na área.
+        let fit = |v: i32, lo: i32, hi: i32| if hi < lo { lo } else { v.clamp(lo, hi) };
+        let x = fit(to.x, area.x - ox, area.right() - b.w - ox);
+        let y = fit(to.y, area.y - oy, area.bottom() - b.h - oy);
+        if let Some(Annotation::Text { at, .. }) = self.items.get_mut(i) {
+            *at = Point { x, y };
+        }
     }
 
     /// Apaga todas as anotações de uma vez (um único passo de desfazer).

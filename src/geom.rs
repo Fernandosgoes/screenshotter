@@ -171,6 +171,8 @@ pub fn dimension_label(r: Rect) -> String {
 pub struct BarLayout {
     pub vertical: Rect,
     pub horizontal: Rect,
+    /// Ícone de mover texto, ao lado do T (calculado pela barra de ferramentas).
+    pub text_move: Rect,
 }
 
 /// Posiciona as barras (PRD F7):
@@ -199,6 +201,7 @@ pub fn layout_bars(sel: Rect, screen: Rect, v_items: i32, h_items: i32, item: i3
     BarLayout {
         vertical: shift_inside(Rect { x: vx, y: vy, w: vw, h: vh }, screen),
         horizontal: shift_inside(Rect { x: hx, y: hy, w: hw, h: hh }, screen),
+        text_move: Rect { x: 0, y: 0, w: 0, h: 0 },
     }
 }
 

@@ -7,7 +7,7 @@
 use crate::capture::{self, Capture};
 use crate::config::{Color, Settings};
 use crate::draw;
-use crate::editor::{Editor, TEXT_MIN_W, TEXT_PAD, Tool};
+use crate::editor::{Editor, Tool};
 use crate::export;
 use crate::geom::{Point, Rect, dimension_label};
 use crate::gfx::{Canvas, argb, argb_from_colorref};
@@ -309,6 +309,7 @@ fn on_mouse_down(p: Point) {
             if let Some(b) = toolbar::hit(&l, p) {
                 return match b {
                     Button::Move => { e.set_tool(Tool::Move); None }
+                    Button::TextMove => { e.set_tool(Tool::MoveText); None }
                     Button::Pen => { e.set_tool(Tool::Pen); None }
                     Button::Line => { e.set_tool(Tool::Line); None }
                     Button::Arrow => { e.set_tool(Tool::Arrow); None }
@@ -445,6 +446,15 @@ fn paint_to(hdc: HDC) {
                     let active = active_button(e.tool);
                     toolbar::paint_panel(cv, l.vertical);
                     toolbar::paint_buttons(cv, &v, Some(active), sess.hover, e.color);
+                    // Ícone de mover texto: aparece com o mouse sobre o T (ou no modo de mover texto).
+                    let fly_shown = matches!(sess.hover, Some(Button::Text) | Some(Button::TextMove))
+                        || e.tool == Tool::MoveText;
+                    if fly_shown {
+                        toolbar::paint_panel(cv, l.text_move);
+                        let active_fly = (e.tool == Tool::MoveText).then_some(Button::TextMove);
+                        let btn = [(Button::TextMove, toolbar::text_move_button(l.text_move))];
+                        toolbar::paint_buttons(cv, &btn, active_fly, sess.hover, e.color);
+                    }
                     toolbar::paint_panel(cv, l.horizontal);
                     toolbar::paint_buttons(cv, &hz, None, sess.hover, e.color);
                     if let Some(cr) = e.cancel_rect() {
@@ -482,6 +492,7 @@ fn active_button(t: Tool) -> Button {
         Tool::Pixelate => Button::Pixelate,
         Tool::Number => Button::Number,
         Tool::Move => Button::Move,
+        Tool::MoveText => Button::Text,
     }
 }
 
@@ -523,19 +534,10 @@ unsafe fn blit_bgra(hdc: HDC, r: Rect, px: &[u8]) {
 /// Caixa de edição do texto: retângulo arredondado visível mesmo vazio, e cursor de digitação.
 unsafe fn paint_text_box(hdc: HDC, cv: &Canvas, at: Point, buf: &str, size: u32, color: Color) {
     unsafe {
-        let (widest, last_w) = draw::measure_text(hdc, buf, size);
+        // O balão (fundo + borda) já vem de draw::paint_annotation; aqui só o cursor.
+        let (_, last_w) = draw::measure_text(hdc, buf, size);
         let line_h = text_line_height(size);
         let lines = buf.split('\n').count() as i32;
-        let w = (widest + 2 * TEXT_PAD + 4).max(TEXT_MIN_W);
-        let h = (lines * line_h + 2 * TEXT_PAD).max(line_h + 2 * TEXT_PAD);
-        let r = (
-            (at.x - TEXT_PAD) as f32,
-            (at.y - TEXT_PAD) as f32,
-            w as f32,
-            h as f32,
-        );
-        cv.fill_round(r, 5.0, argb(0x26, 0xFFFFFF));
-        cv.stroke_round(r, 5.0, argb(0xFF, 0x6366F1), 1.6);
         // Cursor no fim da última linha.
         let cx = (at.x + last_w + 1) as f32;
         let top = (at.y + (lines - 1) * line_h) as f32;

@@ -2,6 +2,7 @@
 //! então o que se vê é o que se copia.
 
 use crate::config::Color;
+use crate::editor::{TEXT_MIN_W, TEXT_PAD};
 use crate::geom::{Point, Rect};
 use crate::model::{Annotation, NUMBER_RADIUS, text_line_height};
 use std::ffi::c_void;
@@ -12,7 +13,7 @@ use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS,
     DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, Ellipse,
     GetStockObject, GetTextExtentPoint32W,
-    HDC, HGDIOBJ, LineTo, MoveToEx, NULL_BRUSH, Polyline, PS_SOLID, Rectangle, RGBQUAD,
+    HDC, HGDIOBJ, LineTo, MoveToEx, NULL_BRUSH, Polyline, PS_SOLID, Rectangle, RoundRect, RGBQUAD,
     SelectObject, SetBkMode, SetTextColor, TextOutW, TRANSPARENT,
 };
 use windows::core::w;
@@ -223,8 +224,34 @@ unsafe fn create_font(size: i32) -> windows::Win32::Graphics::Gdi::HFONT {
     }
 }
 
+/// Balão do texto: retângulo que cabe o texto com folga (mesmo tamanho da caixa de edição).
+pub unsafe fn text_bubble(hdc: HDC, at: Point, text: &str, size: u32) -> RECT {
+    unsafe {
+        let (widest, _) = measure_text(hdc, text, size);
+        let line_h = text_line_height(size);
+        let lines = text.split('\n').count() as i32;
+        let w = (widest + 2 * TEXT_PAD + 4).max(TEXT_MIN_W);
+        let h = (lines * line_h + 2 * TEXT_PAD).max(line_h + 2 * TEXT_PAD);
+        RECT { left: at.x - TEXT_PAD, top: at.y - TEXT_PAD, right: at.x - TEXT_PAD + w, bottom: at.y - TEXT_PAD + h }
+    }
+}
+
 unsafe fn draw_text(hdc: HDC, at: Point, text: &str, color: Color, size: u32) {
     unsafe {
+        // Balão de cantos retos por trás do texto (também no "Salvar como"): fundo branco,
+        // ou preto se o texto for branco, e borda indigo.
+        let b = text_bubble(hdc, at, text, size);
+        let fill = if color == Color::White { 0x0000_0000 } else { 0x00FF_FFFF };
+        let pen = CreatePen(PS_SOLID, 2, windows::Win32::Foundation::COLORREF(0x00F1_6663));
+        let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(fill));
+        let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+        let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
+        let _ = RoundRect(hdc, b.left, b.top, b.right, b.bottom, 8, 8);
+        SelectObject(hdc, old_pen);
+        SelectObject(hdc, old_brush);
+        let _ = DeleteObject(HGDIOBJ(pen.0));
+        let _ = DeleteObject(HGDIOBJ(brush.0));
+
         let font = create_font(size as i32);
         let old_font = SelectObject(hdc, HGDIOBJ(font.0));
         SetTextColor(hdc, windows::Win32::Foundation::COLORREF(color.colorref()));
