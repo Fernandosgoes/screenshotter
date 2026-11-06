@@ -4,6 +4,15 @@
 
 Capturador de tela para Windows, leve e sem rede. Você seleciona uma área, anota e copia ou salva a imagem. Roda na bandeja do sistema e não grava nada em disco sem você pedir.
 
+## Downloads
+
+Na página de [Releases](https://github.com/Fernandosgoes/screenshotter/releases) você encontra dois arquivos da versão mais recente:
+
+- **`Screenshotter-Setup.exe`**: instalador. Recomendado para uso normal. Instala só para o seu usuário, cria o atalho do menu Iniciar e pode iniciar com o Windows.
+- **`Screenshotter.exe`**: versão portátil. Não instala nada: é só abrir. O `settings.json` (configurações) fica na mesma pasta do `.exe`.
+
+Os dois são o mesmo programa. Os arquivos não têm assinatura digital, então o Windows pode mostrar o aviso do SmartScreen (veja a seção de instalação).
+
 ## Instalação
 
 1. Baixe `Screenshotter-Setup.exe` na página de [Releases](https://github.com/Fernandosgoes/screenshotter/releases).
@@ -62,6 +71,7 @@ A barra vertical, ao lado da seleção, tem as ferramentas:
 - **Cores:** clique na bolinha colorida ou use as teclas **1 a 6**. A ferramenta Número usa só vermelho, verde e azul (teclas 1 a 3).
 - **Espessura:** role a roda do mouse para mudar a espessura do traço. Com a ferramenta Texto, a roda muda o tamanho da letra.
 - **Texto:** clique na área com a ferramenta Texto e digite. **Enter** termina, **Shift + Enter** quebra a linha. Clicar fora da caixa também termina o texto.
+- **Mover um texto:** depois de escrever (ou com um texto selecionado), a cruzinha ao lado do **T** fica disponível. Clique nela, arraste o texto (ele não sai da área) e confirme com **Enter** ou clicando fora. O T volta a ser a ferramenta ativa, para você escrever outro texto.
 - **Apagar um desenho:** selecione-o e pressione **Del**.
 - **Refazer:** **Ctrl + Y**.
 
@@ -76,14 +86,16 @@ Depois de copiar ou salvar, a captura fecha.
 
 Clique com o botão direito no ícone da bandeja → **Configurações**. Lá você pode:
 
-- trocar o atalho de captura: Shift + Backspace, Print Screen, Shift + Print Screen ou **Personalizado**. Em Personalizado, clique no campo **Tecla personalizada** e pressione a combinação desejada (ex.: Ctrl + Alt + S). A combinação precisa ter Ctrl, Alt ou Shift, ou ser uma tecla F;
+- trocar o atalho de captura: **Shift + Backspace**, **Shift + Insert** ou **Shift + Print Screen**. Para usar outra combinação, clique em **+ Personalizado** e aperte as teclas desejadas (ex.: Ctrl + Alt + S). Esc cancela. A combinação precisa ter Ctrl, Alt ou Shift, ou ser uma tecla F;
+- escolher a cor de destaque da própria janela de configurações (grafite ou azul), pelas bolinhas no canto superior direito;
+- escolher a fonte dos textos das anotações: Bricolage Grotesque (padrão), Poppins ou Orbitron;
 - escolher o formato padrão de salvamento: JPG (leve, padrão) ou PNG (sem perda);
 - ativar ou desativar a abertura com o Windows;
-- ajustar a espessura padrão do traço, o tamanho padrão do texto e a cor padrão.
+- ajustar a espessura padrão do traço (1 a 12), o tamanho padrão do texto (10 a 48) e a cor padrão.
 
 As alterações valem na próxima captura. As configurações ficam no arquivo `settings.json`, na mesma pasta do `screenshotter.exe`.
 
-Se Shift + Backspace já estiver em uso por outro programa, o app usa Print Screen e avisa ao abrir.
+Se o atalho escolhido já estiver em uso por outro programa, o app usa Print Screen e avisa ao abrir.
 
 ## Sair do app
 

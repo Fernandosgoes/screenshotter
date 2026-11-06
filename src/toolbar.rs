@@ -6,13 +6,14 @@
 use crate::config::Color;
 use crate::geom::{BarLayout, GAP, Point, Rect, layout_bars, shift_inside};
 use crate::gfx::{Canvas, RectF, argb, argb_from_colorref};
+use std::f32::consts::{FRAC_PI_2, PI};
 
 /// Tamanho de um botão, em pixels (compacto, parecido com o do Lightshot).
 pub const BTN: i32 = 30;
 /// Margem interna do painel em volta dos botões.
 pub const PAD: i32 = 4;
-const SWATCH: i32 = 20;
-const SWATCH_GAP: i32 = 5;
+const SWATCH: i32 = 16;
+const SWATCH_GAP: i32 = 4;
 /// Raio dos cantos do painel e dos botões.
 const PANEL_RADIUS: f32 = 12.0;
 const BTN_RADIUS: f32 = 8.0;
@@ -49,6 +50,7 @@ pub enum Button {
 }
 
 pub const VERTICAL: [Button; 13] = [
+    Button::ClearAll,
     Button::Move,
     Button::Pen,
     Button::Line,
@@ -61,7 +63,6 @@ pub const VERTICAL: [Button; 13] = [
     Button::Number,
     Button::ColorSwatch,
     Button::Undo,
-    Button::ClearAll,
 ];
 
 pub const HORIZONTAL: [Button; 3] = [Button::Copy, Button::Save, Button::Close];
@@ -77,8 +78,9 @@ pub fn layout(sel: Rect, screen: Rect) -> BarLayout {
     // Ícone de mover texto: do lado de fora da barra, na linha do T; do lado de dentro só se
     // não couber na tela.
     let row = VERTICAL.iter().position(|b| *b == Button::Text).unwrap_or(7) as i32;
-    let size = BTN + 2 * PAD;
-    let y = vertical.y + row * BTN;
+    // Mesmo tamanho dos botões da barra, na mesma linha do T.
+    let size = BTN;
+    let y = vertical.y + PAD + row * BTN;
     let outside_x = vertical.right() + GAP;
     let x = if outside_x + size <= screen.right() { outside_x } else { (vertical.x - GAP - size).max(0) };
     BarLayout {
@@ -90,7 +92,14 @@ pub fn layout(sel: Rect, screen: Rect) -> BarLayout {
 
 /// Retângulo do botão de mover texto, dentro do seu painel.
 pub fn text_move_button(panel: Rect) -> Rect {
-    Rect { x: panel.x + PAD, y: panel.y + PAD, w: BTN, h: BTN }
+    panel
+}
+
+/// Fundo do ícone de mover texto: mesmo tamanho e cantos dos botões da barra, com borda clara.
+pub fn paint_flyout(cv: &Canvas, r: Rect) {
+    let rr = rf(r);
+    cv.fill_round(rr, BTN_RADIUS, argb(0xFF, PANEL_RGB));
+    cv.stroke_round((rr.0 + 0.5, rr.1 + 0.5, rr.2 - 1.0, rr.3 - 1.0), BTN_RADIUS - 0.5, argb(0xFF, BORDER_RGB), 1.0);
 }
 
 /// Retângulo de cada botão, na ordem de `VERTICAL` e `HORIZONTAL`.
@@ -115,6 +124,11 @@ pub fn button_rects(l: &BarLayout) -> (Vec<(Button, Rect)>, Vec<(Button, Rect)>)
 pub fn hit(l: &BarLayout, p: Point) -> Option<Button> {
     if l.text_move.contains(p) {
         return Some(Button::TextMove);
+    }
+    // Faixa entre a barra e a cruzinha: conta como o T, para a cruzinha não sumir no caminho.
+    let tm = l.text_move;
+    if tm.x > l.vertical.right() && p.x >= l.vertical.right() && p.x < tm.x && p.y >= tm.y && p.y < tm.y + tm.h {
+        return Some(Button::Text);
     }
     let (v, h) = button_rects(l);
     v.into_iter().chain(h).find(|(_, r)| r.contains(p)).map(|(b, _)| b)
@@ -205,86 +219,133 @@ pub fn paint_palette(cv: &Canvas, panel: Rect, swatches: &[(Color, Rect)], curre
     }
 }
 
-/// Ícones desenhados em vetor, com pontas redondas. As coordenadas abaixo foram
-/// desenhadas para um botão de 40 px e são escaladas para o tamanho real do botão.
+/// Ícones da mockup: desenhados numa grade de 24 unidades, traço suave e pontas arredondadas.
+/// A grade é escalada para ~60% do botão.
+fn cubic(c: [(f32, f32); 4]) -> Vec<(f32, f32)> {
+    (0..=8)
+        .map(|i| {
+            let t = i as f32 / 8.0;
+            let u = 1.0 - t;
+            let (a, b, cc, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+            (
+                a * c[0].0 + b * c[1].0 + cc * c[2].0 + d * c[3].0,
+                a * c[0].1 + b * c[1].1 + cc * c[2].1 + d * c[3].1,
+            )
+        })
+        .collect()
+}
+
+/// Pontos de um arco de círculo entre os ângulos `a0` e `a1` (radianos).
+fn arc(cx: f32, cy: f32, r: f32, a0: f32, a1: f32, n: usize) -> Vec<(f32, f32)> {
+    (0..=n)
+        .map(|i| {
+            let t = a0 + (a1 - a0) * i as f32 / n as f32;
+            (cx + r * t.cos(), cy + r * t.sin())
+        })
+        .collect()
+}
+
+/// Ícones da mockup: desenhados numa grade de 24 unidades, traço suave e pontas arredondadas.
+/// A grade é escalada para ~60% do botão.
+
 fn draw_icon(cv: &Canvas, b: Button, r: Rect, current: Color, active: bool) {
     let cx = r.x as f32 + r.w as f32 / 2.0;
     let cy = r.y as f32 + r.h as f32 / 2.0;
-    let s = BTN as f32 / 40.0;
+    // Mover texto é a cruz menor (0,8 da escala da barra), para ficar com a altura do T.
+    let k = if b == Button::TextMove { 0.8 } else { 1.0 };
+    let sc = BTN as f32 * 0.6 / 24.0 * k;
     let rgb = if active { INK_ACTIVE_RGB } else { INK_RGB };
     let ink = argb(0xFF, rgb);
-    let w = (2.2 * s).max(1.7);
-    let p = |dx: f32, dy: f32| (cx + dx * s, cy + dy * s);
-    // Retângulo (x, y, largura, altura) relativo ao centro do botão.
-    let q = |x: f32, y: f32, ww: f32, hh: f32| (cx + x * s, cy + y * s, ww * s, hh * s);
+    let w = (1.5 * sc * 1.25).max(1.1);
+    let p = |x: f32, y: f32| (cx + (x - 12.0) * sc, cy + (y - 12.0) * sc);
+    // Retângulo (x, y, largura, altura) na grade, convertido para pixels.
+    let q = |x: f32, y: f32, ww: f32, hh: f32| {
+        let (px, py) = p(x, y);
+        (px, py, ww * sc, hh * sc)
+    };
+    let m = |v: &[(f32, f32)]| -> Vec<(f32, f32)> { v.iter().map(|&(x, y)| p(x, y)).collect() };
     match b {
         Button::Move | Button::TextMove => {
-            // Cruz de quatro setas.
-            cv.line(p(-8.0, 0.0), p(8.0, 0.0), ink, w);
-            cv.line(p(0.0, -8.0), p(0.0, 8.0), ink, w);
-            cv.polyline(&[p(-3.0, -5.0), p(0.0, -8.0), p(3.0, -5.0)], ink, w);
-            cv.polyline(&[p(-3.0, 5.0), p(0.0, 8.0), p(3.0, 5.0)], ink, w);
-            cv.polyline(&[p(-5.0, -3.0), p(-8.0, 0.0), p(-5.0, 3.0)], ink, w);
-            cv.polyline(&[p(5.0, -3.0), p(8.0, 0.0), p(5.0, 3.0)], ink, w);
+            cv.line(p(12.0, 2.0), p(12.0, 22.0), ink, w);
+            cv.line(p(2.0, 12.0), p(22.0, 12.0), ink, w);
+            cv.polyline(&[p(9.0, 5.0), p(12.0, 2.0), p(15.0, 5.0)], ink, w);
+            cv.polyline(&[p(9.0, 19.0), p(12.0, 22.0), p(15.0, 19.0)], ink, w);
+            cv.polyline(&[p(5.0, 9.0), p(2.0, 12.0), p(5.0, 15.0)], ink, w);
+            cv.polyline(&[p(19.0, 9.0), p(22.0, 12.0), p(19.0, 15.0)], ink, w);
         }
-        Button::Pen => cv.curve(&[p(-8.0, 3.0), p(-3.0, -5.0), p(2.0, 4.0), p(8.0, -4.0)], ink, w),
-        Button::Line => cv.line(p(-7.0, 7.0), p(7.0, -7.0), ink, w),
+        Button::Pen => {
+            let mut wave = cubic([(3.0, 14.0), (5.0, 10.0), (7.0, 10.0), (9.0, 14.0)]);
+            wave.extend(cubic([(9.0, 14.0), (11.0, 18.0), (13.0, 18.0), (15.0, 14.0)]));
+            wave.extend(cubic([(15.0, 14.0), (17.0, 10.0), (18.0, 11.0), (21.0, 13.0)]));
+            cv.polyline(&m(&wave), ink, w);
+        }
+        Button::Line => cv.line(p(5.0, 19.0), p(19.0, 5.0), ink, w),
         Button::Arrow => {
-            cv.line(p(-7.0, 7.0), p(7.0, -7.0), ink, w);
-            cv.line(p(7.0, -7.0), p(-0.5, -7.0), ink, w);
-            cv.line(p(7.0, -7.0), p(7.0, 0.5), ink, w);
+            cv.line(p(5.0, 19.0), p(19.0, 5.0), ink, w);
+            cv.polyline(&[p(9.0, 5.0), p(19.0, 5.0), p(19.0, 15.0)], ink, w);
         }
-        Button::Rect => cv.stroke_round(q(-7.5, -6.0, 15.0, 12.0), 3.0 * s, ink, w),
-        Button::Ellipse => cv.stroke_ellipse(q(-8.0, -6.0, 16.0, 12.0), ink, w),
-        Button::Marker => cv.fill_round(q(-8.0, -3.0, 16.0, 8.0), 2.5 * s, argb(0xDD, 0xFACC15)),
+        Button::Rect => cv.stroke_round(q(3.0, 5.0, 18.0, 14.0), 3.0 * sc, ink, w),
+        Button::Ellipse => cv.stroke_ellipse(q(3.0, 5.0, 18.0, 14.0), ink, w),
+        Button::Marker => {
+            // Amarelo vivo com contorno âmbar, para a faixa aparecer no fundo claro e no escuro.
+            let bar = q(3.5, 9.0, 17.0, 6.0);
+            cv.fill_round(bar, 2.0 * sc, argb(0xFF, 0xFFD000));
+            cv.stroke_round(bar, 2.0 * sc, argb(0xFF, 0xB8860B), (1.0 * sc).max(1.0));
+        }
         Button::Text => {
-            cv.line(p(-6.5, -6.0), p(6.5, -6.0), ink, w);
-            cv.line(p(0.0, -6.0), p(0.0, 7.0), ink, w);
+            cv.polyline(&[p(5.0, 6.0), p(5.0, 4.0), p(19.0, 4.0), p(19.0, 6.0)], ink, w);
+            cv.line(p(12.0, 4.0), p(12.0, 20.0), ink, w);
+            cv.line(p(9.0, 20.0), p(15.0, 20.0), ink, w);
         }
         Button::Pixelate => {
             for gy in 0..3 {
                 for gx in 0..3 {
                     let alpha = if (gx + gy) % 2 == 0 { 0xFF } else { 0x66 };
-                    let sq = q(-9.5 + gx as f32 * 7.0, -9.5 + gy as f32 * 7.0, 5.0, 5.0);
-                    cv.fill_round(sq, 1.2 * s, argb(alpha, rgb));
+                    let sq = q(4.0 + gx as f32 * 6.0, 4.0 + gy as f32 * 6.0, 4.0, 4.0);
+                    cv.fill_round(sq, 1.0 * sc, argb(alpha, rgb));
                 }
             }
         }
         Button::Number => {
-            cv.stroke_ellipse(q(-9.0, -9.0, 18.0, 18.0), ink, w);
-            cv.line(p(-1.5, -3.5), p(1.0, -5.5), ink, w);
-            cv.line(p(1.0, -5.5), p(1.0, 5.0), ink, w);
+            // Círculo grande e um "1" menor, com folga dentro do círculo.
+            cv.stroke_ellipse(q(2.0, 2.0, 20.0, 20.0), ink, w);
+            cv.line(p(12.0, 8.0), p(12.0, 16.0), ink, w);
+            cv.line(p(10.0, 9.8), p(12.0, 8.3), ink, w);
         }
         Button::ColorSwatch => {
-            let rr = q(-9.0, -9.0, 18.0, 18.0);
-            cv.fill_ellipse(rr, argb_from_colorref(current.colorref()));
-            let outline = if current == Color::Black { 0xFFFFFF } else { 0x000000 };
-            cv.stroke_ellipse(rr, argb(0xFF, outline), 1.4);
+            let dot = q(4.5, 4.5, 15.0, 15.0);
+            cv.fill_ellipse(dot, argb_from_colorref(current.colorref()));
+            cv.stroke_ellipse(dot, argb(0xFF, 0x000000), 1.2);
         }
         Button::Undo => {
-            cv.curve(&[p(-8.0, 0.0), p(-1.0, -2.0), p(6.0, 1.0), p(7.0, 6.0)], ink, w);
-            cv.line(p(-8.0, 0.0), p(-3.0, -5.0), ink, w);
-            cv.line(p(-8.0, 0.0), p(-3.0, 5.0), ink, w);
+            cv.polyline(&[p(9.0, 14.0), p(4.0, 9.0), p(9.0, 4.0)], ink, w);
+            cv.line(p(4.0, 9.0), p(14.0, 9.0), ink, w);
+            let mut hook = arc(14.0, 15.0, 6.0, -FRAC_PI_2, FRAC_PI_2, 8);
+            hook.push((11.0, 21.0));
+            cv.polyline(&m(&hook), ink, w);
         }
         Button::ClearAll => {
-            // Borracha: corpo arredondado com divisória e um traço de "apagar" embaixo.
-            cv.stroke_round(q(-8.0, -7.0, 16.0, 10.0), 3.0 * s, ink, w);
-            cv.line(p(0.0, -7.0), p(0.0, 3.0), ink, w);
-            cv.line(p(-6.0, 8.0), p(8.0, 8.0), ink, w);
+            // Borracha da mockup: contorno da peça e traço de "apagar" embaixo.
+            cv.polyline(&m(&[(3.0, 17.0), (11.0, 9.0), (17.0, 15.0), (13.0, 19.0), (7.0, 19.0), (3.0, 17.0)]), ink, w);
+            cv.line(p(14.0, 21.0), p(21.0, 21.0), ink, w);
         }
         Button::Copy => {
-            // Folha de trás (só a parte visível) e folha da frente.
-            cv.polyline(&[p(-3.0, 3.0), p(-8.0, 3.0), p(-8.0, -8.0), p(3.0, -8.0), p(3.0, -3.0)], ink, w);
-            cv.stroke_round(q(-3.0, -3.0, 11.0, 11.0), 2.5 * s, ink, w);
+            // Duas folhas: a da frente fechada e a de trás só nas bordas visíveis.
+            cv.stroke_round(q(8.0, 8.0, 13.0, 13.0), 2.0 * sc, ink, w);
+            let mut back = vec![(4.0, 16.0), (4.0, 6.0)];
+            back.extend(arc(6.0, 6.0, 2.0, PI, 1.5 * PI, 4));
+            back.push((16.0, 4.0));
+            cv.polyline(&m(&back), ink, w);
         }
         Button::Save => {
-            cv.stroke_round(q(-7.5, -7.5, 15.0, 15.0), 3.0 * s, ink, w);
-            cv.stroke_round(q(-3.5, -7.5, 7.0, 5.0), 1.5 * s, ink, w * 0.85);
-            cv.stroke_round(q(-4.5, 1.0, 9.0, 6.5), 1.5 * s, ink, w * 0.85);
+            // Seta descendo para uma bandeja, como o ícone de salvar da marca.
+            cv.polyline(&m(&[(4.0, 15.0), (4.0, 19.0), (20.0, 19.0), (20.0, 15.0)]), ink, w);
+            cv.line(p(12.0, 3.0), p(12.0, 15.0), ink, w);
+            cv.polyline(&m(&[(7.5, 10.5), (12.0, 15.0), (16.5, 10.5)]), ink, w);
         }
         Button::Close => {
-            cv.line(p(-6.0, -6.0), p(6.0, 6.0), ink, w);
-            cv.line(p(6.0, -6.0), p(-6.0, 6.0), ink, w);
+            cv.line(p(6.0, 6.0), p(18.0, 18.0), ink, w);
+            cv.line(p(18.0, 6.0), p(6.0, 18.0), ink, w);
         }
     }
 }
@@ -335,7 +396,7 @@ mod tests {
         let sel = Rect { x: 100, y: 100, w: 200, h: 200 };
         let l = layout(sel, screen);
         let (v, _) = button_rects(&l);
-        let (b, r) = v[3];
+        let (b, r) = v[4];
         assert_eq!(hit(&l, Point { x: r.x + 1, y: r.y + 1 }), Some(b));
         assert_eq!(b, Button::Arrow);
     }

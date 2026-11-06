@@ -5,7 +5,7 @@ use crate::config::{HotkeyChoice, Settings};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     HOT_KEY_MODIFIERS, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey, VK_BACK,
-    VK_SNAPSHOT,
+    VK_INSERT, VK_SNAPSHOT,
 };
 
 pub const ID_HOTKEY: i32 = 1;
@@ -18,6 +18,7 @@ fn keys(s: &Settings) -> (HOT_KEY_MODIFIERS, u32) {
     match s.hotkey {
         HotkeyChoice::ShiftBackspace => (MOD_NOREPEAT | MOD_SHIFT, VK_BACK.0 as u32),
         HotkeyChoice::PrtScn => (MOD_NOREPEAT, VK_SNAPSHOT.0 as u32),
+        HotkeyChoice::ShiftInsert => (MOD_NOREPEAT | MOD_SHIFT, VK_INSERT.0 as u32),
         HotkeyChoice::ShiftPrtScn => (MOD_NOREPEAT | MOD_SHIFT, VK_SNAPSHOT.0 as u32),
         HotkeyChoice::Custom => match s.custom_hotkey {
             Some(h) => (HOT_KEY_MODIFIERS(h.mods) | MOD_NOREPEAT, h.vk),

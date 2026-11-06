@@ -5,6 +5,7 @@ use std::path::Path;
 pub enum HotkeyChoice {
     #[default]
     ShiftBackspace,
+    ShiftInsert,
     PrtScn,
     ShiftPrtScn,
     /// Combinação escolhida pelo usuário (ver `Settings::custom_hotkey`).
@@ -17,6 +18,46 @@ pub enum ImageFormat {
     #[default]
     Jpg,
     Png,
+}
+
+/// Fonte do texto desenhado nas anotações. Bricolage Grotesque é a padrão.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextFont {
+    #[default]
+    Bricolage,
+    Poppins,
+    Orbitron,
+}
+
+impl TextFont {
+    pub const ALL: [TextFont; 3] = [TextFont::Bricolage, TextFont::Poppins, TextFont::Orbitron];
+
+    /// Nome da família, como o Windows a conhece (é o que o GDI procura).
+    pub fn family(self) -> &'static str {
+        match self {
+            TextFont::Bricolage => "Bricolage Grotesque",
+            TextFont::Poppins => "Poppins",
+            TextFont::Orbitron => "Orbitron",
+        }
+    }
+}
+
+/// Cor de destaque da janela de configurações (a bolinha no canto superior direito).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Accent {
+    #[default]
+    Grafite,
+    Azul,
+}
+
+impl Accent {
+    /// Cor em 0xRRGGBB.
+    pub fn rgb(self) -> u32 {
+        match self {
+            Accent::Grafite => 0x272C38,
+            Accent::Azul => 0x1E6BFF,
+        }
+    }
 }
 
 /// Atalho personalizado: `mods` usa os bits de MOD_ALT (1), MOD_CONTROL (2) e MOD_SHIFT (4);
@@ -74,6 +115,10 @@ pub struct Settings {
     pub jpeg_quality: u8,
     /// Formato padrão do "Salvar como".
     pub save_format: ImageFormat,
+    /// Fonte do texto das anotações.
+    pub text_font: TextFont,
+    /// Cor de destaque da janela de configurações.
+    pub accent: Accent,
 }
 
 impl Default for Settings {
@@ -87,6 +132,8 @@ impl Default for Settings {
             default_color: Color::Red,
             jpeg_quality: 80,
             save_format: ImageFormat::Jpg,
+            text_font: TextFont::Bricolage,
+            accent: Accent::Grafite,
         }
     }
 }
@@ -139,6 +186,16 @@ mod tests {
         let s = Settings { save_format: ImageFormat::Png, ..Settings::default() };
         s.save(&p).unwrap();
         assert_eq!(Settings::load(&p).save_format, ImageFormat::Png);
+    }
+
+    #[test]
+    fn text_font_and_accent_round_trip() {
+        let dir = std::env::temp_dir().join("shot_cfg_font");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("settings.json");
+        let s = Settings { text_font: TextFont::Orbitron, accent: Accent::Azul, ..Settings::default() };
+        s.save(&p).unwrap();
+        assert_eq!(Settings::load(&p), s);
     }
 
     #[test]

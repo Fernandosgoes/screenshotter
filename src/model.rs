@@ -186,6 +186,12 @@ impl Document {
         self.selected
     }
 
+    /// Seleciona o texto mais recente (o último colocado), se houver algum.
+    pub fn select_last_text(&mut self) -> bool {
+        self.selected = self.items.iter().rposition(|a| matches!(a, Annotation::Text { .. }));
+        self.selected.is_some()
+    }
+
     /// Seleciona o texto mais recente sob o ponto (ignora formas e números).
     pub fn select_text_at(&mut self, p: Point) -> bool {
         let hit = self.items.iter().enumerate().rev().find(|(_, a)| {

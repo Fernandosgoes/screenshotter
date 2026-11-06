@@ -75,6 +75,7 @@ pub struct Editor {
 
 impl Editor {
     pub fn new(capture: Capture, settings: &Settings) -> Self {
+        crate::draw::set_text_font(settings.text_font);
         Editor {
             capture,
             doc: Document::new(),
@@ -208,6 +209,19 @@ impl Editor {
             self.commit_text();
         }
 
+        // Modo de mover texto: agarra o texto sob o mouse; clicar fora dele termina o movimento.
+        if self.tool == Tool::MoveText {
+            if self.doc.select_text_at(p) {
+                if let Some(origin) = self.doc.selected_text_origin() {
+                    self.doc.begin_gesture();
+                    self.state = Interaction::MovingText { anchor: p, origin };
+                }
+            } else {
+                self.finish_move_text();
+            }
+            return;
+        }
+
         let Some(sel) = self.sel else {
             self.state = Interaction::Selecting { anchor: p };
             self.sel = Some(Rect::from_points(p, p));
@@ -231,14 +245,7 @@ impl Editor {
             Tool::Move => {
                 self.state = Interaction::Moving { anchor: p, origin: sel };
             }
-            Tool::MoveText => {
-                if self.doc.select_text_at(p) {
-                    if let Some(origin) = self.doc.selected_text_origin() {
-                        self.doc.begin_gesture();
-                        self.state = Interaction::MovingText { anchor: p, origin };
-                    }
-                }
-            }
+            Tool::MoveText => {}
             Tool::Number => {
                 let n = self.doc.next_number();
                 self.doc.push(Annotation::Number { center: p, n, color: self.color });
@@ -331,6 +338,23 @@ impl Editor {
         self.state = Interaction::Idle;
     }
 
+    /// A cruzinha de mover texto só responde com um texto escrito ou selecionado.
+    pub fn can_move_text(&self) -> bool {
+        self.text.as_ref().is_some_and(|t| !t.buf.is_empty()) || self.doc.selected_text_origin().is_some()
+    }
+
+    /// Clique na cruzinha: confirma o texto em edição e seleciona o texto para mover.
+    pub fn start_move_text(&mut self) {
+        self.commit_text();
+        self.set_tool(Tool::MoveText);
+        self.doc.select_last_text();
+    }
+
+    /// Termina de mover: o texto fica onde foi deixado e a ferramenta volta para o T.
+    pub fn finish_move_text(&mut self) {
+        self.set_tool(Tool::Text);
+    }
+
     pub fn commit_text(&mut self) {
         if let Some(t) = self.text.take() {
             if !t.buf.is_empty() {
@@ -348,6 +372,10 @@ impl Editor {
     /// Retorna true se havia uma caixa de texto aberta (a tecla foi consumida).
     pub fn on_enter(&mut self, shift: bool) -> bool {
         match self.text.as_mut() {
+            None if self.tool == Tool::MoveText => {
+                self.finish_move_text();
+                true
+            }
             None => false,
             Some(t) => {
                 if shift {
@@ -666,7 +694,39 @@ mod tests {
         assert!(!e.cancel_hit(Point { x: 150, y: 150 }));
     }
 
+        #[test]
+    fn move_text_flow_start_move_and_enter_returns_to_text_tool() {
+        let mut e = Editor::test_new(800, 600);
+        e.on_mouse_down(Point { x: 10, y: 10 });
+        e.on_mouse_move(Point { x: 700, y: 500 }, false);
+        e.on_mouse_up();
+        e.set_tool(Tool::Text);
+        // Sem texto escrito a cruzinha não funciona.
+        assert!(!e.can_move_text());
+        e.on_mouse_down(Point { x: 100, y: 100 });
+        e.on_char('o');
+        assert!(e.can_move_text());
+        e.start_move_text();
+        assert_eq!(e.tool, Tool::MoveText);
+        assert!(e.doc.selected_text_origin().is_some());
+        assert!(e.on_enter(false));
+        assert_eq!(e.tool, Tool::Text);
+    }
+
     #[test]
+    fn move_text_flow_click_outside_returns_to_text_tool() {
+        let mut e = Editor::test_new(800, 600);
+        e.on_mouse_down(Point { x: 10, y: 10 });
+        e.on_mouse_move(Point { x: 700, y: 500 }, false);
+        e.on_mouse_up();
+        e.on_mouse_down(Point { x: 100, y: 100 });
+        e.on_char('o');
+        e.start_move_text();
+        e.on_mouse_down(Point { x: 600, y: 450 });
+        assert_eq!(e.tool, Tool::Text);
+    }
+
+#[test]
     fn move_tool_moves_selection_only_when_active() {
         let mut e = Editor::test_new(800, 600);
         e.sel = Some(Rect { x: 100, y: 100, w: 200, h: 100 });

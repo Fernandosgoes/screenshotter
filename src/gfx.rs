@@ -7,7 +7,7 @@ use windows::Win32::Graphics::Gdi::HDC;
 use windows::Win32::Graphics::GdiPlus::{
     FillModeAlternate, GdipAddPathArc, GdipClosePathFigure, GdipCreateFromHDC, GdipCreatePath,
     GdipCreatePen1, GdipCreateSolidFill, GdipDeleteBrush, GdipDeleteGraphics, GdipDeletePath,
-    GdipDeletePen, GdipDrawCurve, GdipDrawEllipse, GdipDrawLine, GdipDrawLines, GdipDrawPath,
+    GdipDeletePen, GdipDrawEllipse, GdipDrawLine, GdipDrawLines, GdipDrawPath,
     GdipFillEllipse, GdipFillPath, GdipSetPenEndCap, GdipSetPenLineJoin, GdipSetPenStartCap,
     GdipSetPixelOffsetMode, GdipSetSmoothingMode, GdiplusStartup, GdiplusStartupInput,
     GpBrush, GpGraphics, GpPath, GpPen, GpSolidFill, LineCapRound, LineJoinRound,
@@ -143,16 +143,6 @@ impl Canvas {
         unsafe {
             let pen = self.pen(color, width);
             GdipDrawLines(self.g, pen, v.as_ptr(), v.len() as i32);
-            GdipDeletePen(pen);
-        }
-    }
-
-    /// Curva suave passando por todos os pontos.
-    pub fn curve(&self, pts: &[(f32, f32)], color: u32, width: f32) {
-        let v = Self::points(pts);
-        unsafe {
-            let pen = self.pen(color, width);
-            GdipDrawCurve(self.g, pen, v.as_ptr(), v.len() as i32);
             GdipDeletePen(pen);
         }
     }

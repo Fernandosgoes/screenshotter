@@ -309,7 +309,12 @@ fn on_mouse_down(p: Point) {
             if let Some(b) = toolbar::hit(&l, p) {
                 return match b {
                     Button::Move => { e.set_tool(Tool::Move); None }
-                    Button::TextMove => { e.set_tool(Tool::MoveText); None }
+                    Button::TextMove => {
+                        if e.can_move_text() {
+                            e.start_move_text();
+                        }
+                        None
+                    }
                     Button::Pen => { e.set_tool(Tool::Pen); None }
                     Button::Line => { e.set_tool(Tool::Line); None }
                     Button::Arrow => { e.set_tool(Tool::Arrow); None }
@@ -445,15 +450,21 @@ fn paint_to(hdc: HDC) {
                     let (v, hz) = toolbar::button_rects(&l);
                     let active = active_button(e.tool);
                     toolbar::paint_panel(cv, l.vertical);
-                    toolbar::paint_buttons(cv, &v, Some(active), sess.hover, e.color);
+                    toolbar::paint_buttons(cv, &v, active, sess.hover, e.color);
                     // Ícone de mover texto: aparece com o mouse sobre o T (ou no modo de mover texto).
+                    // Fica visível com o mouse sobre o T, no modo de mover texto, ao digitar um
+                    // texto e enquanto um texto estiver selecionado.
                     let fly_shown = matches!(sess.hover, Some(Button::Text) | Some(Button::TextMove))
-                        || e.tool == Tool::MoveText;
+                        || e.tool == Tool::MoveText
+                        || e.text.is_some()
+                        || e.doc.selected_text_origin().is_some();
                     if fly_shown {
-                        toolbar::paint_panel(cv, l.text_move);
+                        toolbar::paint_flyout(cv, l.text_move);
                         let active_fly = (e.tool == Tool::MoveText).then_some(Button::TextMove);
+                        // Hover cinza só quando a cruzinha está disponível (há texto).
+                        let fly_hover = if e.can_move_text() { sess.hover } else { None };
                         let btn = [(Button::TextMove, toolbar::text_move_button(l.text_move))];
-                        toolbar::paint_buttons(cv, &btn, active_fly, sess.hover, e.color);
+                        toolbar::paint_buttons(cv, &btn, active_fly, fly_hover, e.color);
                     }
                     toolbar::paint_panel(cv, l.horizontal);
                     toolbar::paint_buttons(cv, &hz, None, sess.hover, e.color);
@@ -480,19 +491,20 @@ fn paint_to(hdc: HDC) {
     });
 }
 
-fn active_button(t: Tool) -> Button {
+fn active_button(t: Tool) -> Option<Button> {
     match t {
-        Tool::Pen => Button::Pen,
-        Tool::Line => Button::Line,
-        Tool::Arrow => Button::Arrow,
-        Tool::Rect => Button::Rect,
-        Tool::Ellipse => Button::Ellipse,
-        Tool::Marker => Button::Marker,
-        Tool::Text => Button::Text,
-        Tool::Pixelate => Button::Pixelate,
-        Tool::Number => Button::Number,
-        Tool::Move => Button::Move,
-        Tool::MoveText => Button::Text,
+        Tool::Pen => Some(Button::Pen),
+        Tool::Line => Some(Button::Line),
+        Tool::Arrow => Some(Button::Arrow),
+        Tool::Rect => Some(Button::Rect),
+        Tool::Ellipse => Some(Button::Ellipse),
+        Tool::Marker => Some(Button::Marker),
+        Tool::Text => Some(Button::Text),
+        Tool::Pixelate => Some(Button::Pixelate),
+        Tool::Number => Some(Button::Number),
+        Tool::Move => Some(Button::Move),
+        // Movendo texto, o T perde a seleção: quem fica preto é a cruzinha.
+        Tool::MoveText => None,
     }
 }
 

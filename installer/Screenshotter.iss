@@ -3,7 +3,7 @@
 ; Pré-requisito: cargo build --release  (gera target\release\Screenshotter.exe)
 
 #define MyAppName "Screenshotter"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppExe "Screenshotter.exe"
 
 [Setup]

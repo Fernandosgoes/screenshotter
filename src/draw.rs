@@ -1,7 +1,9 @@
 ﻿//! Desenho GDI das anotações. Usado tanto na tela quanto na exportação,
 //! então o que se vê é o que se copia.
 
-use crate::config::Color;
+use crate::config::{Color, TextFont};
+use crate::gfx::{Canvas, argb};
+use std::sync::atomic::{AtomicU8, Ordering};
 use crate::editor::{TEXT_MIN_W, TEXT_PAD};
 use crate::geom::{Point, Rect};
 use crate::model::{Annotation, NUMBER_RADIUS, text_line_height};
@@ -13,7 +15,7 @@ use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS,
     DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, Ellipse,
     GetStockObject, GetTextExtentPoint32W,
-    HDC, HGDIOBJ, LineTo, MoveToEx, NULL_BRUSH, Polyline, PS_SOLID, Rectangle, RoundRect, RGBQUAD,
+    HDC, HGDIOBJ, LineTo, MoveToEx, NULL_BRUSH, Polyline, PS_SOLID, Rectangle, RGBQUAD,
     SelectObject, SetBkMode, SetTextColor, TextOutW, TRANSPARENT,
 };
 use windows::core::w;
@@ -203,7 +205,25 @@ pub unsafe fn paint_annotation(hdc: HDC, a: &Annotation, dx: i32, dy: i32, hint_
     }
 }
 
+/// Fonte escolhida nas configurações (0 Bricolage, 1 Poppins, 2 Orbitron).
+static TEXT_FONT: AtomicU8 = AtomicU8::new(0);
+
+/// Define a fonte dos textos desenhados (balões). Vale para a tela e para a exportação.
+pub fn set_text_font(f: TextFont) {
+    let v = match f {
+        TextFont::Bricolage => 0,
+        TextFont::Poppins => 1,
+        TextFont::Orbitron => 2,
+    };
+    TEXT_FONT.store(v, Ordering::Relaxed);
+}
+
 unsafe fn create_font(size: i32) -> windows::Win32::Graphics::Gdi::HFONT {
+    let face = match TEXT_FONT.load(Ordering::Relaxed) {
+        1 => w!("Poppins"),
+        2 => w!("Orbitron"),
+        _ => w!("Bricolage Grotesque"),
+    };
     unsafe {
         CreateFontW(
             -size,
@@ -219,7 +239,7 @@ unsafe fn create_font(size: i32) -> windows::Win32::Graphics::Gdi::HFONT {
             windows::Win32::Graphics::Gdi::CLIP_DEFAULT_PRECIS,
             CLEARTYPE_QUALITY,
             0,
-            w!("Segoe UI"),
+            face,
         )
     }
 }
@@ -240,17 +260,14 @@ unsafe fn draw_text(hdc: HDC, at: Point, text: &str, color: Color, size: u32) {
     unsafe {
         // Balão de cantos retos por trás do texto (também no "Salvar como"): fundo branco,
         // ou preto se o texto for branco, e borda indigo.
+        // Desenhado com GDI+ (antialias), para os cantos levemente arredondados saírem lisos.
         let b = text_bubble(hdc, at, text, size);
         let fill = if color == Color::White { 0x0000_0000 } else { 0x00FF_FFFF };
-        let pen = CreatePen(PS_SOLID, 2, windows::Win32::Foundation::COLORREF(0x00F1_6663));
-        let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(fill));
-        let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
-        let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
-        let _ = RoundRect(hdc, b.left, b.top, b.right, b.bottom, 8, 8);
-        SelectObject(hdc, old_pen);
-        SelectObject(hdc, old_brush);
-        let _ = DeleteObject(HGDIOBJ(pen.0));
-        let _ = DeleteObject(HGDIOBJ(brush.0));
+        if let Some(cv) = Canvas::from_hdc(hdc) {
+            let r = (b.left as f32, b.top as f32, (b.right - b.left) as f32, (b.bottom - b.top) as f32);
+            cv.fill_round(r, 5.0, argb(0xFF, fill));
+            cv.stroke_round(r, 5.0, argb(0xFF, 0x6366F1), 2.0);
+        }
 
         let font = create_font(size as i32);
         let old_font = SelectObject(hdc, HGDIOBJ(font.0));
