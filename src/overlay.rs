@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::ptr::null_mut;
 use std::time::Instant;
-use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC,
     CreateDIBSection, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE,
@@ -33,8 +33,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DBLCLKS, CreateWindowExW, DefWindowProcW, HWND_TOPMOST, IDC_ARROW, LoadCursorW,
     RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetCursor, SetForegroundWindow,
-    SetWindowPos, ShowWindow, WM_CHAR, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
-    WM_MOUSEWHEEL, WM_PAINT, WM_SETCURSOR, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, MF_STRING, SetWindowPos, ShowWindow,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_CHAR, WM_KEYDOWN, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONUP, WM_SETCURSOR, WNDCLASSW,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{PCWSTR, w};
 
@@ -184,6 +186,10 @@ pub fn start_capture(settings: &Settings) -> windows::core::Result<()> {
 pub fn finish() {
     let taken = SESSION.with(|s| s.borrow_mut().take());
     if let Some(sess) = taken {
+        // Cor escolhida nesta captura vira a cor da próxima. Grava só quando o usuário trocou.
+        if sess.editor.color_changed {
+            remember_color(sess.editor.color);
+        }
         unsafe {
             let _ = ReleaseCapture();
             let _ = ShowWindow(sess.hwnd, SW_HIDE);
@@ -192,6 +198,20 @@ pub fn finish() {
             sess.back.free();
         }
     }
+}
+
+/// Grava a última cor escolhida no settings.json, sem mexer nos outros campos.
+/// Fica fora de qualquer chamada Win32 modal (finish roda depois do diálogo de salvar).
+fn remember_color(c: Color) {
+    let path = crate::settings_path();
+    let mut s = Settings::load(&path);
+    // Sem arquivo ainda, o "iniciar com o Windows" real está no registro (ver settings::open).
+    // Criar o arquivo com o padrão desligaria o início automático.
+    if !path.exists() {
+        s.start_with_windows = crate::startup::is_enabled();
+    }
+    s.default_color = c;
+    let _ = s.save(&path);
 }
 
 fn lparam_point(lp: LPARAM) -> Point {
@@ -251,6 +271,24 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             redraw(hwnd);
             LRESULT(0)
         }
+        WM_RBUTTONUP => {
+            // Botão direito sobre a seleção: menu com copiar e salvar, como nos botões da barra.
+            let p = lparam_point(lp);
+            let on_selection = SESSION.with(|s| {
+                s.borrow()
+                    .as_ref()
+                    .is_some_and(|sess| sess.editor.toolbar_visible() && sess.editor.sel.is_some_and(|r| r.contains(p)))
+            });
+            if on_selection {
+                match context_menu(hwnd) {
+                    Some(Cmd::Copy) => copy_and_close(),
+                    Some(Cmd::Save) => save_and_close(),
+                    Some(Cmd::Close) => finish(),
+                    None => {}
+                }
+            }
+            LRESULT(0)
+        }
         WM_MOUSEWHEEL => {
             let delta = ((wp.0 >> 16) & 0xFFFF) as i16;
             SESSION.with(|s| {
@@ -292,6 +330,28 @@ enum Cmd {
     Close,
 }
 
+const MENU_COPY: usize = 1;
+const MENU_SAVE: usize = 2;
+
+/// Menu do botão direito: copiar e salvar. Devolve a ação escolhida (None se o menu foi fechado).
+fn context_menu(hwnd: HWND) -> Option<Cmd> {
+    unsafe {
+        let menu = CreatePopupMenu().ok()?;
+        let _ = AppendMenuW(menu, MF_STRING, MENU_COPY, w!("Copiar	Ctrl+C"));
+        let _ = AppendMenuW(menu, MF_STRING, MENU_SAVE, w!("Salvar como...	Ctrl+S"));
+        let mut pt = POINT::default();
+        let _ = GetCursorPos(&mut pt);
+        let _ = SetForegroundWindow(hwnd);
+        let id = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, None, hwnd, None).0 as usize;
+        let _ = DestroyMenu(menu);
+        match id {
+            MENU_COPY => Some(Cmd::Copy),
+            MENU_SAVE => Some(Cmd::Save),
+            _ => None,
+        }
+    }
+}
+
 fn on_mouse_down(p: Point) {
     // Decisão primeiro, sem segurar o borrow durante comandos que chamam Win32 modal.
     let cmd = SESSION.with(|s| {
@@ -308,22 +368,22 @@ fn on_mouse_down(p: Point) {
             let l = toolbar::layout(sel, e.screen_rect());
             if let Some(b) = toolbar::hit(&l, p) {
                 return match b {
-                    Button::Move => { e.set_tool(Tool::Move); None }
+                    Button::Move => { e.toggle_tool(Tool::Move); None }
                     Button::TextMove => {
                         if e.can_move_text() {
                             e.start_move_text();
                         }
                         None
                     }
-                    Button::Pen => { e.set_tool(Tool::Pen); None }
-                    Button::Line => { e.set_tool(Tool::Line); None }
-                    Button::Arrow => { e.set_tool(Tool::Arrow); None }
-                    Button::Rect => { e.set_tool(Tool::Rect); None }
-                    Button::Ellipse => { e.set_tool(Tool::Ellipse); None }
-                    Button::Marker => { e.set_tool(Tool::Marker); None }
-                    Button::Text => { e.set_tool(Tool::Text); None }
-                    Button::Pixelate => { e.set_tool(Tool::Pixelate); None }
-                    Button::Number => { e.set_tool(Tool::Number); None }
+                    Button::Pen => { e.toggle_tool(Tool::Pen); None }
+                    Button::Line => { e.toggle_tool(Tool::Line); None }
+                    Button::Arrow => { e.toggle_tool(Tool::Arrow); None }
+                    Button::Rect => { e.toggle_tool(Tool::Rect); None }
+                    Button::Ellipse => { e.toggle_tool(Tool::Ellipse); None }
+                    Button::Marker => { e.toggle_tool(Tool::Marker); None }
+                    Button::Text => { e.toggle_tool(Tool::Text); None }
+                    Button::Pixelate => { e.toggle_tool(Tool::Pixelate); None }
+                    Button::Number => { e.toggle_tool(Tool::Number); None }
                     Button::ColorSwatch => { e.toggle_palette(); None }
                     Button::Undo => { e.undo(); None }
                     Button::ClearAll => { e.clear_all(); None }
@@ -504,7 +564,8 @@ fn active_button(t: Tool) -> Option<Button> {
         Tool::Number => Some(Button::Number),
         Tool::Move => Some(Button::Move),
         // Movendo texto, o T perde a seleção: quem fica preto é a cruzinha.
-        Tool::MoveText => None,
+        // Sem ferramenta, nenhum botão fica aceso.
+        Tool::MoveText | Tool::None => None,
     }
 }
 

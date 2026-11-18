@@ -34,6 +34,9 @@ pub enum Tool {
     Move,
     /// Mover só um texto já colocado (ícone ao lado do T).
     MoveText,
+    /// Nenhuma ferramenta ativa (ferramenta clicada de novo). Arrastar move a área e as
+    /// bordas redimensionam; desenhos não são criados.
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,6 +64,9 @@ pub struct Editor {
     pub sel: Option<Rect>,
     pub tool: Tool,
     pub color: Color,
+    /// O usuário escolheu uma cor nesta captura (troca automática do Número não conta).
+    /// Quando verdadeiro, a cor vira a padrão da próxima captura.
+    pub color_changed: bool,
     pub stroke: u32,
     pub text_size: u32,
     /// Qualidade do JPEG ao salvar (vem das configurações).
@@ -82,6 +88,7 @@ impl Editor {
             sel: None,
             tool: Tool::Pen,
             color: settings.default_color,
+            color_changed: false,
             stroke: settings.stroke_width,
             text_size: settings.text_size,
             jpeg_quality: settings.jpeg_quality,
@@ -113,6 +120,15 @@ impl Editor {
         }
     }
 
+    /// Clicar na ferramenta que já está ativa a desliga; clicar em outra troca.
+    pub fn toggle_tool(&mut self, t: Tool) {
+        if self.tool == t {
+            self.set_tool(Tool::None);
+        } else {
+            self.set_tool(t);
+        }
+    }
+
     /// Cores oferecidas pela paleta: o contador só aceita vermelho e verde.
     pub fn palette_colors(&self) -> &'static [Color] {
         if self.tool == Tool::Number { &NUMBER_COLORS } else { &Color::ALL }
@@ -127,6 +143,7 @@ impl Editor {
             return;
         }
         self.color = c;
+        self.color_changed = true;
         self.palette_open = false;
         if let Some(i) = self.doc.selected() {
             recolor(&mut self.doc, i, c);
@@ -233,6 +250,14 @@ impl Editor {
             return;
         }
 
+        // Sem ferramenta, a borda também redimensiona (a alça pode ser pequena demais).
+        if self.tool == Tool::None {
+            if let Some(h) = sel.hit_edge(p, HANDLE_TOL) {
+                self.state = Interaction::ResizingSel { handle: h };
+                return;
+            }
+        }
+
         if !sel.contains(p) {
             // Clique fora da seleção não faz nada: a área só sai pelo X, pelo ESC
             // ou depois de cancelar, quando dá para desenhar uma nova.
@@ -242,7 +267,7 @@ impl Editor {
         // Dentro da seleção, o clique usa a ferramenta atual: formas já desenhadas
         // não são selecionadas nem movidas, assim dá para desenhar por cima e dentro delas.
         match self.tool {
-            Tool::Move => {
+            Tool::Move | Tool::None => {
                 self.state = Interaction::Moving { anchor: p, origin: sel };
             }
             Tool::MoveText => {}
@@ -746,5 +771,52 @@ mod tests {
         e.on_mouse_move(Point { x: 5000, y: 5000 }, false);
         e.on_mouse_up();
         assert_eq!(e.sel, Some(Rect { x: 600, y: 500, w: 200, h: 100 }));
+    }
+
+    #[test]
+    fn clicking_active_tool_again_turns_it_off() {
+        let mut e = Editor::test_new(800, 600);
+        assert_eq!(e.tool, Tool::Pen, "caneta é a ferramenta inicial");
+        e.toggle_tool(Tool::Pen);
+        assert_eq!(e.tool, Tool::None);
+        e.toggle_tool(Tool::Pen);
+        assert_eq!(e.tool, Tool::Pen, "clicar de novo na caneta liga de volta");
+        e.toggle_tool(Tool::Rect);
+        assert_eq!(e.tool, Tool::Rect, "outra ferramenta troca normalmente");
+    }
+
+    #[test]
+    fn no_tool_drag_inside_moves_area() {
+        let mut e = Editor::test_new(800, 600);
+        e.sel = Some(Rect { x: 100, y: 100, w: 200, h: 100 });
+        e.set_tool(Tool::None);
+        e.on_mouse_down(Point { x: 150, y: 150 });
+        e.on_mouse_move(Point { x: 180, y: 190 }, false);
+        e.on_mouse_up();
+        assert_eq!(e.sel, Some(Rect { x: 130, y: 140, w: 200, h: 100 }));
+        assert!(e.doc.items().is_empty(), "sem ferramenta não cria desenho");
+    }
+
+    #[test]
+    fn no_tool_drag_right_edge_grows_width() {
+        let mut e = Editor::test_new(800, 600);
+        e.sel = Some(Rect { x: 100, y: 100, w: 200, h: 100 });
+        e.set_tool(Tool::None);
+        // Borda direita em x = 300; clique a 2 px dela, no meio da altura.
+        e.on_mouse_down(Point { x: 298, y: 150 });
+        e.on_mouse_move(Point { x: 350, y: 150 }, false);
+        e.on_mouse_up();
+        assert_eq!(e.sel, Some(Rect { x: 100, y: 100, w: 250, h: 100 }));
+    }
+
+    #[test]
+    fn set_color_marks_change_but_number_auto_color_does_not() {
+        let mut e = Editor::test_new(800, 600);
+        e.color = Color::Yellow;
+        e.set_tool(Tool::Number);
+        assert_eq!(e.color, Color::Red, "troca automática do Número");
+        assert!(!e.color_changed, "troca automática não conta como escolha");
+        e.set_color(Color::Green);
+        assert!(e.color_changed);
     }
 }

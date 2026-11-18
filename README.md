@@ -47,6 +47,7 @@ Clicar fora da área **não** cancela a seleção. Assim você não perde o reco
 
 - **Mover:** escolha a **cruz** (primeiro botão da barra vertical) e arraste dentro da área. Com a cruz ativa, arrastar dentro da área move a seleção. Com qualquer outra ferramenta, arrastar dentro da área desenha.
 - **Redimensionar:** arraste os quadradinhos pretos nas bordas e cantos.
+- **Sem ferramenta:** clique de novo na ferramenta ativa para desligá-la. Com nenhuma ferramenta, arrastar dentro da área move a seleção e arrastar qualquer ponto da borda redimensiona por aquele lado. Os desenhos feitos continuam no lugar, e a captura sai recortada pela área nova.
 - Para escolher uma área nova: cancele (X ou Esc) e selecione de novo.
 
 ### 4. Anotar
@@ -68,7 +69,7 @@ A barra vertical, ao lado da seleção, tem as ferramentas:
 | Bolinha colorida | Paleta de cores | — |
 | Desfazer | Desfaz a última ação | Ctrl + Z |
 
-- **Cores:** clique na bolinha colorida ou use as teclas **1 a 6**. A ferramenta Número usa só vermelho, verde e azul (teclas 1 a 3).
+- **Cores:** clique na bolinha colorida ou use as teclas **1 a 6**. A ferramenta Número usa só vermelho, verde e azul (teclas 1 a 3). A última cor escolhida fica lembrada e vira a cor da próxima captura.
 - **Espessura:** role a roda do mouse para mudar a espessura do traço. Com a ferramenta Texto, a roda muda o tamanho da letra.
 - **Texto:** clique na área com a ferramenta Texto e digite. **Enter** termina, **Shift + Enter** quebra a linha. Clicar fora da caixa também termina o texto.
 - **Mover um texto:** depois de escrever (ou com um texto selecionado), a cruzinha ao lado do **T** fica disponível. Clique nela, arraste o texto (ele não sai da área) e confirme com **Enter** ou clicando fora. O T volta a ser a ferramenta ativa, para você escrever outro texto.
@@ -91,7 +92,7 @@ Clique com o botão direito no ícone da bandeja → **Configurações**. Lá vo
 - escolher a fonte dos textos das anotações: Bricolage Grotesque (padrão), Poppins ou Orbitron;
 - escolher o formato padrão de salvamento: JPG (leve, padrão) ou PNG (sem perda);
 - ativar ou desativar a abertura com o Windows;
-- ajustar a espessura padrão do traço (1 a 12), o tamanho padrão do texto (10 a 48) e a cor padrão.
+- ajustar a espessura padrão do traço (1 a 12) e o tamanho padrão do texto (10 a 48).
 
 As alterações valem na próxima captura. As configurações ficam no arquivo `settings.json`, na mesma pasta do `screenshotter.exe`.
 

@@ -110,6 +110,8 @@ pub struct Settings {
     pub start_with_windows: bool,
     pub stroke_width: u32,
     pub text_size: u32,
+    /// Última cor escolhida durante uma captura. Vira a cor da próxima captura
+    /// (gravada ao fechar a captura, só quando o usuário trocou de cor).
     pub default_color: Color,
     /// Qualidade do JPEG ao salvar (1 a 100). Menor = arquivo mais leve.
     pub jpeg_quality: u8,

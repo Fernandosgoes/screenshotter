@@ -92,6 +92,23 @@ impl Rect {
             .map(|(h, _)| h)
     }
 
+    /// Borda (N, S, E ou W) mais próxima de `p`, dentro de `tol`. O ponto precisa estar no
+    /// trecho da borda; os cantos ficam para `hit_handle`.
+    pub fn hit_edge(&self, p: Point, tol: i32) -> Option<Handle> {
+        let within_x = p.x >= self.x - tol && p.x <= self.right() + tol;
+        let within_y = p.y >= self.y - tol && p.y <= self.bottom() + tol;
+        [
+            (Handle::N, (p.y - self.y).abs(), within_x),
+            (Handle::S, (p.y - self.bottom()).abs(), within_x),
+            (Handle::W, (p.x - self.x).abs(), within_y),
+            (Handle::E, (p.x - self.right()).abs(), within_y),
+        ]
+        .into_iter()
+        .filter(|(_, d, ok)| *ok && *d <= tol)
+        .min_by_key(|(_, d, _)| *d)
+        .map(|(h, _, _)| h)
+    }
+
     /// Move só as bordas ligadas à alça; a borda oposta fica parada.
     pub fn resize_by_handle(&self, h: Handle, p: Point) -> Rect {
         let mut left = self.x;
@@ -253,6 +270,17 @@ mod tests {
         assert_eq!(r.hit_handle(Point { x: 200, y: 150 }, 4), None);
         let r2 = r.resize_by_handle(Handle::E, Point { x: 350, y: 0 });
         assert_eq!(r2, Rect { x: 100, y: 100, w: 250, h: 100 });
+    }
+
+    #[test]
+    fn edge_hit_ignores_corners_and_far_points() {
+        let r = Rect { x: 100, y: 100, w: 200, h: 100 };
+        assert_eq!(r.hit_edge(Point { x: 300, y: 150 }, 6), Some(Handle::E));
+        assert_eq!(r.hit_edge(Point { x: 200, y: 99 }, 6), Some(Handle::N));
+        assert_eq!(r.hit_edge(Point { x: 200, y: 150 }, 6), None, "meio da área não é borda");
+        assert_eq!(r.hit_edge(Point { x: 300, y: 300 }, 6), None, "longe da borda");
+        // Fora do trecho da borda (abaixo da altura da área) não conta.
+        assert_eq!(r.hit_edge(Point { x: 300, y: 230 }, 6), None);
     }
 
     #[test]

@@ -1,10 +1,10 @@
 //! Janela de configurações (aberta pelo menu da bandeja). Desenhada à mão, sempre em branco, no
-//! layout aprovado: atalho (padrões e personalizado), cor, traço, texto, fonte, formato e
+//! layout aprovado: atalho (padrões e personalizado), traço, texto, fonte, formato e
 //! "iniciar com o Windows". Salvar grava settings.json, registra o atalho na hora e ajusta a
 //! inicialização automática.
 
-use crate::config::{Accent, Color, Hotkey, HotkeyChoice, ImageFormat, Settings, TextFont};
-use crate::gfx::{Canvas, RectF, argb, argb_from_colorref};
+use crate::config::{Accent, Hotkey, HotkeyChoice, ImageFormat, Settings, TextFont};
+use crate::gfx::{Canvas, RectF, argb};
 use crate::{hotkey, startup};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
@@ -67,7 +67,6 @@ enum Hit {
     Hk(usize),
     Add,
     Dot(Accent),
-    Swatch(usize),
     Slider(Slider),
     Font(usize),
     Format(usize),
@@ -82,7 +81,6 @@ struct State {
     custom: Option<Hotkey>,
     /// Esperando o usuário apertar a combinação do atalho personalizado.
     capturing: bool,
-    color: Color,
     stroke: u32,
     text: u32,
     font: TextFont,
@@ -107,7 +105,6 @@ struct Lay {
     dots: [(Accent, R); 2],
     hk: Vec<R>,
     add: R,
-    swatches: Vec<(Color, R)>,
     stroke_y: f32,
     stroke_track: R,
     stroke_value: R,
@@ -142,12 +139,6 @@ fn layout(n_hk: usize) -> Lay {
     y += 28.0 + 18.0;
     let des_y = y;
     y += 16.0 + 8.0;
-    let swatches = Color::ALL
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (*c, (M + i as f32 * 34.0, y, 24.0, 24.0)))
-        .collect();
-    y += 24.0 + 16.0;
     let stroke_y = y;
     let stroke_track = (TRACK_X, y, TRACK_W, 24.0);
     let stroke_value = (W - M - 60.0, y, 60.0, 24.0);
@@ -185,7 +176,6 @@ fn layout(n_hk: usize) -> Lay {
         ],
         hk,
         add,
-        swatches,
         stroke_y,
         stroke_track,
         stroke_value,
@@ -338,11 +328,6 @@ fn hit_at(p: P, st: &State) -> Option<Hit> {
     if inside(lay.add, p) {
         return Some(Hit::Add);
     }
-    for (i, (_, r)) in lay.swatches.iter().enumerate() {
-        if inside(*r, p) {
-            return Some(Hit::Swatch(i));
-        }
-    }
     let track_hit = |t: R| (t.0 - 8.0, t.1 - 8.0, t.2 + 16.0, t.3 + 16.0);
     if inside(track_hit(lay.stroke_track), p) {
         return Some(Hit::Slider(Slider::Stroke));
@@ -439,10 +424,6 @@ fn on_down(hwnd: HWND, p: P) {
         }
         Hit::Dot(a) => {
             with(|s| s.accent = a);
-        }
-        Hit::Swatch(i) => {
-            let c = Color::ALL[i];
-            with(|s| s.color = c);
         }
         Hit::Slider(sl) => {
             with(|s| s.drag = Some(sl));
@@ -549,7 +530,6 @@ fn save(hwnd: HWND) {
     if st.custom.is_some() {
         s.custom_hotkey = st.custom;
     }
-    s.default_color = st.color;
     s.stroke_width = st.stroke;
     s.text_size = st.text;
     s.save_format = st.format;
@@ -671,17 +651,6 @@ fn paint(hwnd: HWND) {
             for (i, (choice, _)) in items.iter().enumerate() {
                 let sel = st.hotkey == *choice;
                 rrect(&cv, lay.hk[i], if sel { accent } else { SURFACE2 }, s);
-            }
-
-            // Cores: contorno preto (preto leva branco); a escolhida ganha anel.
-            for (c, r) in lay.swatches.iter() {
-                let e = sr(*r, s);
-                cv.fill_ellipse(e, argb_from_colorref(c.colorref()));
-                let ol = if *c == Color::Black { WHITE } else { 0x000000 };
-                cv.stroke_ellipse(e, argb(0xFF, ol), 1.2 * s);
-                if *c == st.color {
-                    cv.stroke_ellipse(sr(grow(*r, 3.0), s), argb(0xFF, accent), 2.0 * s);
-                }
             }
 
             slider_paint(&cv, lay.stroke_track, st.stroke, STROKE_RANGE, accent, s);
@@ -832,7 +801,6 @@ pub fn open(main: HWND) {
             hotkey: cur.hotkey,
             custom: cur.custom_hotkey,
             capturing: false,
-            color: cur.default_color,
             stroke: cur.stroke_width.clamp(STROKE_RANGE.0, STROKE_RANGE.1),
             text: cur.text_size.clamp(TEXT_RANGE.0, TEXT_RANGE.1),
             font: cur.text_font,
