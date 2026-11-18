@@ -358,10 +358,6 @@ fn on_mouse_down(p: Point) {
         let mut g = s.borrow_mut();
         let sess = g.as_mut()?;
         let e = &mut sess.editor;
-        // X de cancelar: fecha a captura (só clicando nele; clique fora não fecha).
-        if e.cancel_hit(p) {
-            return Some(Cmd::Close);
-        }
         // As barras só existem (e só recebem clique) com a seleção pronta.
         let visible = e.toolbar_visible();
         if let (true, Some(sel)) = (visible, e.sel) {
@@ -528,9 +524,6 @@ fn paint_to(hdc: HDC) {
                     }
                     toolbar::paint_panel(cv, l.horizontal);
                     toolbar::paint_buttons(cv, &hz, None, sess.hover, e.color);
-                    if let Some(cr) = e.cancel_rect() {
-                        toolbar::paint_cancel(cv, cr);
-                    }
                     if e.palette_open {
                         toolbar::paint_palette(
                             cv,

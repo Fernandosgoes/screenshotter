@@ -38,7 +38,7 @@ Pressione **Shift + Backspace**. A tela escurece e a imagem fica congelada.
 
 ### 2. Sair da captura sem salvar
 
-- Clique no **X** no canto superior direito da seleção, ou
+- Clique no **X** da barra de ícones (ao lado de Copiar e Salvar), ou
 - pressione **Esc**.
 
 Clicar fora da área **não** cancela a seleção. Assim você não perde o recorte por engano.
@@ -48,7 +48,7 @@ Clicar fora da área **não** cancela a seleção. Assim você não perde o reco
 - **Mover:** escolha a **cruz** (primeiro botão da barra vertical) e arraste dentro da área. Com a cruz ativa, arrastar dentro da área move a seleção. Com qualquer outra ferramenta, arrastar dentro da área desenha.
 - **Redimensionar:** arraste os quadradinhos pretos nas bordas e cantos.
 - **Sem ferramenta:** clique de novo na ferramenta ativa para desligá-la. Com nenhuma ferramenta, arrastar dentro da área move a seleção e arrastar qualquer ponto da borda redimensiona por aquele lado. Os desenhos feitos continuam no lugar, e a captura sai recortada pela área nova.
-- Para escolher uma área nova: cancele (X ou Esc) e selecione de novo.
+- Para escolher uma área nova: cancele (X da barra ou Esc) e selecione de novo.
 
 ### 4. Anotar
 

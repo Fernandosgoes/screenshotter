@@ -191,19 +191,6 @@ pub fn paint_buttons(
     }
 }
 
-/// Quadradinho com X para cancelar a captura (canto superior direito da seleção).
-pub fn paint_cancel(cv: &Canvas, r: Rect) {
-    let rr = rf(r);
-    cv.shadow(rr, 4.0);
-    cv.fill_round(rr, 4.0, argb(0xFF, PANEL_RGB));
-    cv.stroke_round((rr.0 + 0.5, rr.1 + 0.5, rr.2 - 1.0, rr.3 - 1.0), 3.5, argb(0xFF, BORDER_RGB), 1.0);
-    let m = 5.0;
-    let (x0, y0) = (rr.0 + m, rr.1 + m);
-    let (x1, y1) = (rr.0 + rr.2 - m, rr.1 + rr.3 - m);
-    cv.line((x0, y0), (x1, y1), argb(0xFF, INK_RGB), 1.8);
-    cv.line((x1, y0), (x0, y1), argb(0xFF, INK_RGB), 1.8);
-}
-
 /// Paleta: bolinhas com a cor; a cor ativa tem anel de destaque.
 pub fn paint_palette(cv: &Canvas, panel: Rect, swatches: &[(Color, Rect)], current: Color) {
     paint_panel(cv, panel);

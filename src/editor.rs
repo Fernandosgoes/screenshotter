@@ -10,10 +10,6 @@ use crate::model::{Annotation, Document, bounds_of, text_line_height};
 pub const HANDLE_TOL: i32 = 6;
 const MIN_SEL: i32 = 2;
 const NUMBER_COLORS: [Color; 3] = [Color::Red, Color::Green, Color::Blue];
-/// Lado do quadradinho com X (cancelar) no canto superior direito da seleção.
-pub const CANCEL_SIZE: i32 = 18;
-/// Distância do quadradinho X até as bordas da seleção.
-const CANCEL_INSET: i32 = 4;
 /// Margem entre o texto e a borda da caixa de edição.
 pub const TEXT_PAD: i32 = 5;
 /// Largura mínima da caixa de edição de texto (visível mesmo vazia).
@@ -177,24 +173,6 @@ impl Editor {
                     | Interaction::Moving { .. }
                     | Interaction::MovingText { .. }
             )
-    }
-
-    /// Quadradinho X de cancelar: canto superior direito, por dentro da seleção.
-    pub fn cancel_rect(&self) -> Option<Rect> {
-        if !self.toolbar_visible() {
-            return None;
-        }
-        let sel = self.sel?;
-        Some(Rect {
-            x: sel.right() - CANCEL_INSET - CANCEL_SIZE,
-            y: sel.y + CANCEL_INSET,
-            w: CANCEL_SIZE,
-            h: CANCEL_SIZE,
-        })
-    }
-
-    pub fn cancel_hit(&self, p: Point) -> bool {
-        self.cancel_rect().is_some_and(|r| r.contains(p))
     }
 
     /// Caixa de edição do texto (com margem), visível mesmo com o texto vazio.
@@ -706,17 +684,6 @@ mod tests {
         e.on_mouse_down(Point { x: 600, y: 500 });
         e.on_mouse_up();
         assert_eq!(e.sel, sel, "clique fora não cancela a área");
-    }
-
-    #[test]
-    fn cancel_button_hit_test() {
-        let mut e = Editor::test_new(800, 600);
-        e.on_mouse_down(Point { x: 100, y: 100 });
-        e.on_mouse_move(Point { x: 300, y: 300 }, false);
-        e.on_mouse_up();
-        let cr = e.cancel_rect().expect("X visível com a barra");
-        assert!(e.cancel_hit(Point { x: cr.x + 2, y: cr.y + 2 }));
-        assert!(!e.cancel_hit(Point { x: 150, y: 150 }));
     }
 
         #[test]
